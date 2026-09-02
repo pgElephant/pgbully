@@ -28,6 +28,17 @@
  */
 
 /*
+ * Wait-event definitions (PG_WAIT_EXTENSION and friends) were split out of
+ * pgstat.h into their own header in PG16.  Include whichever one this server
+ * has so callers can just include compat.h.
+ */
+#if PG_VERSION_NUM >= 160000
+#include "utils/wait_event.h"
+#else
+#include "pgstat.h"
+#endif
+
+/*
  * TimestampDifferenceMilliseconds() has existed since PG13, but its return
  * type widened to a 64-bit value in PG15+.  We always treat it as a signed
  * 64-bit count of milliseconds, which is correct for all supported versions.

@@ -30,7 +30,6 @@
 #include "tcop/tcopprot.h"
 #include "utils/guc.h"
 #include "utils/timestamp.h"
-#include "utils/wait_event.h"
 
 #include "compat.h"
 #include "pgbully.h"

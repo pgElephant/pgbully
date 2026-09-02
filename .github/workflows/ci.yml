@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install PostgreSQL ${{ matrix.pgversion }} and build deps
         run: |
@@ -47,7 +47,21 @@ jobs:
 
       - name: TAP regression suite
         run: |
-          sudo make installcheck \
+          # initdb refuses to run as root, and the runner user is not root, so
+          # this runs unprivileged and owns everything it creates.  Clear any
+          # root-owned leftovers from the steps above first.
+          sudo rm -rf tmp_check
+          make installcheck \
             PG_CONFIG=/usr/lib/postgresql/${{ matrix.pgversion }}/bin/pg_config \
-          || (echo "---- regression diffs ----"; cat regression.diffs 2>/dev/null; \
-              find . -name 'regress_log_*' -exec cat {} +; exit 1)
+          || (echo "---- test logs ----"; \
+              find . -name 'regress_log_*' -exec cat {} + ; exit 1)
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-pg${{ matrix.pgversion }}
+          path: |
+            tmp_check/log/
+          if-no-files-found: ignore
+          retention-days: 7

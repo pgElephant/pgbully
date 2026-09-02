@@ -22,6 +22,7 @@
  */
 #include "postgres.h"
 
+#include "lib/stringinfo.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
 
