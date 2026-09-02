@@ -954,8 +954,15 @@ pgbully_rpc_kv_apply(PG_FUNCTION_ARGS)
         SPI_execute("DELETE FROM pgbully.kv", false, 0);
         SPI_finish();
 
+        /*
+         * Take the leader's version rather than bumping our own.  A reset is
+         * the leader declaring a new baseline, and it has to win outright: a
+         * node left holding a higher version would otherwise decide the
+         * leader was behind and push the emptied rows straight back.
+         */
         LWLockAcquire(PgbCtl->lock, LW_EXCLUSIVE);
-        PgbCtl->kv_version++;
+        PgbCtl->kv_version = version;
+        PgbCtl->leader_kv_version = version;
         PgbCtl->kv_seeded = true;
         now_at = PgbCtl->kv_version;
         LWLockRelease(PgbCtl->lock);

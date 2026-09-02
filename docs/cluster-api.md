@@ -302,6 +302,11 @@ not while a node is down.
 Empty the store on this node and every reachable peer. Leader only,
 superuser-only, and exactly as blunt as it sounds.
 
+A reset is the leader declaring a new baseline, so it takes precedence: every
+peer adopts the leader's version rather than keeping its own. Without that, a
+node holding a higher version would decide the leader was behind and push the
+emptied rows straight back.
+
 ### `pgbully.kv_sync() → bigint`
 
 Pull from the leader now instead of waiting for the next read, and return the

@@ -204,14 +204,23 @@ is($n1->safe_psql('postgres',
     'gone', 'the deletion reached the follower');
 
 # A row from a term older than ours is a deposed leader talking; drop it.
-my $term = $n1->safe_psql('postgres', 'SELECT pgbully.term()');
-$n1->safe_psql('postgres',
-    "SELECT pgbully.rpc_kv_apply('stale', 'ghost', false, 999999, 0)");
-is($n1->safe_psql('postgres', "SELECT coalesce(pgbully.kv_get('stale'), 'gone')"),
+#
+# Probe the leader, not a follower, and take the next version rather than
+# inventing a large one: a follower left holding a version the leader has not
+# reached would correctly decide the leader is behind and push the row back,
+# which is the reconciliation working, not a fencing failure.
+my $term = $n2->safe_psql('postgres', 'SELECT pgbully.term()');
+my $next = $n2->safe_psql('postgres',
+    'SELECT last_applied_index + 1 FROM pgbully.kv_get_stats()');
+
+$n2->safe_psql('postgres',
+    "SELECT pgbully.rpc_kv_apply('stale', 'ghost', false, $next, 0)");
+is($n2->safe_psql('postgres', "SELECT coalesce(pgbully.kv_get('stale'), 'gone')"),
     'gone', 'a write stamped with a stale term is fenced out');
-$n1->safe_psql('postgres',
-    "SELECT pgbully.rpc_kv_apply('fenced', 'ok', false, 999999, $term)");
-is($n1->safe_psql('postgres', "SELECT coalesce(pgbully.kv_get('fenced'), 'gone')"),
+
+$n2->safe_psql('postgres',
+    "SELECT pgbully.rpc_kv_apply('fenced', 'ok', false, $next, $term)");
+is($n2->safe_psql('postgres', "SELECT coalesce(pgbully.kv_get('fenced'), 'gone')"),
     'ok', 'the same write in the current term is accepted');
 
 my $stats = $n2->safe_psql('postgres',
@@ -222,12 +231,13 @@ isnt($n2->safe_psql('postgres',
         'SELECT last_applied_index FROM pgbully.kv_get_stats()'),
     '0', 'the store has a non-zero version');
 
-# Reset clears every reachable node, not just the leader.
+# Reset clears every reachable node, not just the leader, and stays cleared:
+# a node left holding a higher version would otherwise push the rows back.
 $n2->safe_psql('postgres', 'SELECT pgbully.kv_reset()');
-is($n2->safe_psql('postgres', 'SELECT pgbully.kv_list_keys()'),
-    '[]', 'kv_reset() empties the leader');
-is($n1->safe_psql('postgres', 'SELECT pgbully.kv_list_keys()'),
-    '[]', 'and the follower');
+ok(wait_for($n2, 'SELECT pgbully.kv_list_keys()', '[]', 'kv_reset leader'),
+    'kv_reset() empties the leader, and it stays empty');
+ok(wait_for($n1, 'SELECT pgbully.kv_list_keys()', '[]', 'kv_reset follower'),
+    'and the follower');
 
 # The log half of the interface is absent, not stubbed.
 foreach my $fn (
