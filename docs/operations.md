@@ -36,6 +36,20 @@ SELECT heartbeat_age_ms FROM pgbully.status();
 | Election churn | `elections_started` climbing steadily | timeouts too tight, or flapping network |
 | Peer down | `peers().reachable = false` persists | investigate that node / network path |
 
+### Through the cluster-manager interface
+
+If your monitoring already speaks the vendor-neutral interface, the same facts
+are available under those names — see [cluster-api.md](cluster-api.md):
+
+```sql
+SELECT * FROM pgbully.get_cluster_status();
+SELECT * FROM pgbully.member_list;      -- one row per member, with status
+SELECT * FROM pgbully.worker_status;
+```
+
+`pgbully.member_list` is the quickest whole-cluster read: it marks each member
+`leader`, `follower` or `unavailable` in one query, from any node.
+
 ### Logs
 
 pgBully logs state transitions at `LOG` level, e.g.:
@@ -49,6 +63,16 @@ LOG:  pgbully: node 5 stepping down; observed higher term 7
 ```
 
 Grepping `grep pgbully: $PGDATA/log/*.log` gives a full election history.
+
+For a stuck cluster, `pgbully.set_debug(true)` makes the worker log its state
+on every pass:
+
+```
+LOG:  pgbully: state=follower term=7 leader=3 heartbeat_age=214ms election=no
+```
+
+That is one line per loop iteration, so turn it off again with
+`pgbully.set_debug(false)` once you have what you need.
 
 ## Using leadership in your application
 
@@ -101,6 +125,13 @@ Re-enable with `on` + reload.
 
 Because the membership list is static config, keep it under configuration
 management so all nodes stay in sync.
+
+`pgbully.add_node(id, address, port)` and `pgbully.remove_node(id)` make the
+same change take effect immediately, without a reload — useful when a control
+plane needs the cluster to react before configuration management catches up.
+They write to shared memory only: `pgbully.nodes` is still the source of
+truth, and the next reload restores it. Treat them as a way to apply a change
+early, not as a way to skip step 1.
 
 ## Failover behavior
 
@@ -164,6 +195,16 @@ dropping heartbeats. Increase `election_timeout` (rule of thumb: ≥ 3–5×
 Another node has an equal or lower id and cannot see the higher-id leader.
 Check reachability with `pgbully.peers()` from each side; a one-way network
 path (A can reach B but not vice versa) is a common culprit.
+
+### Is this node configured correctly at all?
+
+`pgbully.test()` checks the three things that must hold before the worker will
+do anything — shared memory attached, `pgbully.node_id` set, and that id
+present in `pgbully.nodes` — and warns about whichever one failed:
+
+```sql
+SELECT pgbully.test();
+```
 
 ### Worker not running
 

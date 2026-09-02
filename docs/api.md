@@ -1,8 +1,13 @@
 # SQL API reference
 
-All objects live in the `pgbully` schema. Functions fall into two groups:
-**monitoring/control** (for operators and applications) and **RPC handlers**
-(called by peer nodes; you normally never invoke these directly).
+This page covers pgBully's native surface, which lives in the `pgbully`
+schema. Functions fall into two groups: **monitoring/control** (for operators
+and applications) and **RPC handlers** (called by peer nodes; you normally
+never invoke these directly).
+
+pgBully also implements the vendor-neutral cluster-manager interface —
+`pgbully.get_cluster_status()`, `pgbully.member_list` and the rest. That is
+documented separately in [cluster-api.md](cluster-api.md).
 
 Every function raises an error if the extension is not active (not present in
 `shared_preload_libraries`):
@@ -93,8 +98,13 @@ One row per configured node, with live reachability. `STABLE`. Columns:
 | `conninfo` | `text` | its libpq connection string |
 | `is_self` | `boolean` | is this the local node? |
 | `is_leader` | `boolean` | is this the current leader? |
-| `reachable` | `boolean` | did the last contact attempt succeed? |
-| `last_seen` | `timestamptz` | time of last successful contact |
+| `reachable` | `boolean` | was the peer alive at the last exchange? |
+| `last_seen` | `timestamptz` | time of the last exchange |
+
+An exchange is either direction: a probe this node sent that the peer
+answered, or a message the peer sent us. That matters for a follower, which
+never probes anyone — it learns the leader is alive from the heartbeats it
+receives.
 
 ### `pgbully.cluster` (view)
 

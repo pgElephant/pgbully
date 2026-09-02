@@ -23,10 +23,30 @@ Initial release.
 - Monitoring/control SQL surface: `node_id()`, `leader()`, `is_leader()`,
   `state()`, `term()`, `status()`, `peers()`, the `cluster` view, and
   `force_election()`.
+- Cluster-manager API: the vendor-neutral function and view set a control
+  plane expects from any consensus backend, so an application written against
+  that interface runs on pgBully unchanged. Functions are unqualified
+  (`pgbully.get_cluster_status()`, `pgbully.get_nodes()`, `pgbully.is_leader()`,
+  `pgbully.get_leader()`, `pgbully.get_term()`, `pgbully.init()`,
+  `pgbully.add_node()`, `pgbully.remove_node()`, `pgbully.get_worker_state()`,
+  `pgbully.get_version()`, `pgbully.test()`, `pgbully.set_debug()`,
+  `pgbully.get_queue_status()`, `pgbully.get_nodes_json()`); the etcd-style
+  views (`pgbully.member_list`, `pgbully.endpoint_status`, ...) live in the
+  `pgbully` schema, alongside unqualified `pgbully.cluster_state`,
+  `pgbully.cluster_overview`, `pgbully.worker_status`, `pgbully.nodes` and
+  `pgbully.log_status`.
+- `pgbully.add_node()` / `pgbully.remove_node()` change membership in shared
+  memory at once; `pgbully.nodes` stays the source of truth and a reload
+  restores it.
+- `pgbully.set_debug()` and per-iteration worker state logging.
+- Log-replication and key/value entry points are declared with their full
+  signatures and raise `feature_not_supported` (`0A000`), so a caller probing
+  for them gets a precise error instead of "function does not exist".
 - Support for PostgreSQL 15, 16, 17 and 18.
-- TAP regression suite (`t/001_bully.pl`) and a dependency-free shell
-  integration test (`test/integration.sh`).
+- TAP regression suites (`t/001_bully.pl` for election and failover,
+  `t/002_cluster_api.pl` for the cluster-manager API) and a dependency-free
+  shell integration test (`test/integration.sh`).
 - Full documentation set under `docs/`.
 
-[Unreleased]: https://github.com/pgedge/pgBully/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/pgedge/pgBully/releases/tag/v1.0.0
+[Unreleased]: https://github.com/pgElephant/pgbully/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/pgElephant/pgbully/releases/tag/v1.0.0

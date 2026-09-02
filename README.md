@@ -4,7 +4,7 @@
 
 **Distributed leader election for PostgreSQL, using the Bully algorithm.**
 
-[![CI](https://github.com/pgedge/pgBully/actions/workflows/ci.yml/badge.svg)](https://github.com/pgedge/pgBully/actions/workflows/ci.yml)
+[![CI](https://github.com/pgElephant/pgbully/actions/workflows/ci.yml/badge.svg)](https://github.com/pgElephant/pgbully/actions/workflows/ci.yml)
 [![PostgreSQL 15–18](https://img.shields.io/badge/PostgreSQL-15%20%7C%2016%20%7C%2017%20%7C%2018-336791)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/license-PostgreSQL-blue.svg)](LICENSE)
 
@@ -138,6 +138,25 @@ authentication. A node that cannot be reached is simply treated as down.
 
 Full reference: [docs/api.md](docs/api.md).
 
+### Cluster-manager API
+
+Alongside the native functions above, pgBully implements the vendor-neutral
+interface a cluster manager expects from any consensus backend, so an
+application written against that interface runs on pgBully unchanged:
+
+```sql
+SELECT * FROM pgbully.get_cluster_status();
+SELECT * FROM pgbully.get_nodes();
+SELECT * FROM pgbully.member_list;      -- etcdctl-style member listing
+SELECT pgbully.is_leader(), pgbully.get_leader(), pgbully.get_term();
+```
+
+Log-replication and key/value entry points are part of that interface and the
+Bully algorithm has no equivalent, so they are declared but raise
+`feature_not_supported` (`0A000`) rather than failing as missing functions.
+
+Full reference: [docs/cluster-api.md](docs/cluster-api.md).
+
 ## Configuration
 
 | GUC | Default | Description |
@@ -173,6 +192,7 @@ make installcheck PG_CONFIG=/path/to/pg_config
 | [docs/architecture.md](docs/architecture.md) | Workers, shared memory, transport |
 | [docs/algorithm.md](docs/algorithm.md) | The Bully algorithm, term extension, proofs of intent |
 | [docs/api.md](docs/api.md) | Complete SQL reference |
+| [docs/cluster-api.md](docs/cluster-api.md) | The cluster-manager interface |
 | [docs/operations.md](docs/operations.md) | Monitoring, failover, consistency caveats, troubleshooting |
 | [docs/faq.md](docs/faq.md) | Frequently asked questions |
 

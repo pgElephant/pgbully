@@ -39,6 +39,9 @@
 #include "storage/latch.h"
 #include "storage/lwlock.h"
 
+/* Extension version, reported by pgbully_get_version(). */
+#define PGBULLY_VERSION         "1.0"
+
 #define PGBULLY_MAX_NODES       64
 #define PGBULLY_CONNINFO_LEN    512
 #define PGBULLY_SHMEM_MAGIC     0x42554C4C  /* "BULL" */
@@ -99,6 +102,9 @@ typedef struct PgbShared
      */
     bool            election_requested; /* a lower node asked us to run one */
 
+    /* Verbose worker logging, toggled by pgbully_set_debug(). */
+    bool            debug;
+
     int32           npeers;
     PgbPeer         peers[PGBULLY_MAX_NODES];
 
@@ -156,5 +162,11 @@ PGDLLEXPORT void pgbully_worker_main(Datum main_arg);
 
 /* ---- helpers shared between modules ---- */
 extern const char *pgbully_state_name(PgbState s);
+
+/*
+ * cluster_api.c implements the standard cluster-management interface
+ * (pgbully.init(), pgbully.get_cluster_status(), ...) on top of the state
+ * above.  It needs no exports beyond the SQL-callable functions themselves.
+ */
 
 #endif                          /* PGBULLY_H */

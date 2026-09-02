@@ -77,6 +77,9 @@ Verify:
 SELECT * FROM pgbully.status();
 ```
 
+This creates both pgBully's native functions and the
+[cluster-manager API](cluster-api.md); there is nothing extra to enable.
+
 ## Multi-node checklist
 
 Repeat on every node, taking care that:

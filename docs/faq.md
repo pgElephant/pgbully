@@ -48,6 +48,29 @@ be unsafe for your workload, gate leader-only actions behind an external fence.
 See [operations.md](operations.md#consistency-caveats) and
 [algorithm.md](algorithm.md#guarantees-and-limits).
 
+### Can I use it from something that expects a generic consensus backend?
+
+Yes. Besides its native functions, pgBully implements the vendor-neutral
+cluster-manager interface — `pgbully.get_cluster_status()`,
+`pgbully.get_nodes()`, `pgbully.is_leader()`, `pgbully.member_list` and the
+rest — so an application written against that interface runs on pgBully
+unchanged. See [cluster-api.md](cluster-api.md).
+
+The parts of that interface covering a replicated log and a key/value store
+have no equivalent in the Bully algorithm. Those functions exist, so a caller
+probing for them gets a definite answer, but every one raises
+`feature_not_supported` (SQLSTATE `0A000`) rather than pretending to work. An
+application can catch that and fall back:
+
+```sql
+DO $$
+BEGIN
+    PERFORM pgbully.kv_put('k', 'v');
+EXCEPTION WHEN feature_not_supported THEN
+    RAISE NOTICE 'this backend elects a leader only';
+END $$;
+```
+
 ### Does pgBully move data, promote replicas, or fence writes?
 
 No. It elects a leader and tells you who it is via `pgbully.is_leader()` /

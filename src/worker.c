@@ -148,6 +148,9 @@ pgbully_main_loop(void)
         TimestampTz now;
         PgbState    state;
         int64       elapsed_hb;
+        int64       term;
+        int32       leader_id;
+        bool        debug;
         bool        do_election = false;
         long        naptime;
         int         rc;
@@ -193,12 +196,22 @@ pgbully_main_loop(void)
         LWLockAcquire(PgbCtl->lock, LW_EXCLUSIVE);
         state = PgbCtl->state;
         elapsed_hb = pgb_ts_diff_ms(PgbCtl->last_heartbeat, now);
+        term = PgbCtl->term;
+        leader_id = PgbCtl->leader_id;
+        debug = PgbCtl->debug;
         if (PgbCtl->election_requested)
         {
             PgbCtl->election_requested = false;
             do_election = true;
         }
         LWLockRelease(PgbCtl->lock);
+
+        if (debug)
+            ereport(LOG,
+                    (errmsg("pgbully: state=%s term=" INT64_FORMAT " leader=%d "
+                            "heartbeat_age=" INT64_FORMAT "ms election=%s",
+                            pgbully_state_name(state), term, leader_id,
+                            elapsed_hb, do_election ? "pending" : "no")));
 
         if (do_election)
         {

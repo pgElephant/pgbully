@@ -101,6 +101,12 @@ too high delays failover.
 After a reload, pgBully re-parses `pgbully.nodes` and discards cached peer
 connections so new conninfo strings take effect immediately.
 
+Two things are not GUCs. `pgbully.set_debug()` toggles verbose worker logging
+at runtime, and `pgbully.add_node()` / `pgbully.remove_node()` change
+membership in shared memory without a reload — but `pgbully.nodes` remains the
+source of truth, so the next reload overwrites them. See
+[cluster-api.md](cluster-api.md).
+
 ## Example: three-node cluster
 
 ```ini

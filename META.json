@@ -23,13 +23,13 @@
       }
    },
    "resources": {
-      "homepage": "https://github.com/pgedge/pgBully",
+      "homepage": "https://github.com/pgElephant/pgbully",
       "bugtracker": {
-         "web": "https://github.com/pgedge/pgBully/issues"
+         "web": "https://github.com/pgElephant/pgbully/issues"
       },
       "repository": {
-         "url": "git://github.com/pgedge/pgBully.git",
-         "web": "https://github.com/pgedge/pgBully",
+         "url": "git://github.com/pgElephant/pgbully.git",
+         "web": "https://github.com/pgElephant/pgbully",
          "type": "git"
       }
    },

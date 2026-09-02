@@ -11,7 +11,7 @@ participating you agree to uphold it.
 ## Getting started
 
 ```bash
-git clone https://github.com/pgedge/pgBully
+git clone https://github.com/pgElephant/pgbully
 cd pgBully
 make PG_CONFIG=/path/to/pg_config
 sudo make install PG_CONFIG=/path/to/pg_config

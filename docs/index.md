@@ -22,6 +22,7 @@ next-highest node is automatic.
 | [architecture.md](architecture.md) | Background worker, shared memory, libpq transport, message flow |
 | [algorithm.md](algorithm.md) | The Bully algorithm and pgBully's term-based extension |
 | [api.md](api.md) | Complete SQL function/view reference |
+| [cluster-api.md](cluster-api.md) | The vendor-neutral cluster-manager interface |
 | [operations.md](operations.md) | Monitoring, manual failover, consistency caveats, troubleshooting |
 | [faq.md](faq.md) | Frequently asked questions |
 

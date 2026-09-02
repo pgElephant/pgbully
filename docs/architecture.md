@@ -2,7 +2,8 @@
 
 pgBully is deliberately small. It has four moving parts: a background worker,
 a shared-memory control block, a set of SQL-callable RPC handlers, and a libpq
-transport layer. This document explains how they fit together.
+transport layer. A fifth file projects that state through the cluster-manager
+interface. This document explains how they fit together.
 
 ```
    ┌─────────────────────────── one PostgreSQL node ───────────────────────────┐
@@ -53,6 +54,7 @@ LWLock. It holds:
 - the parsed peer table (`peers[]`, with per-peer reachability);
 - **inbox flags** raised by RPC backends (e.g. `election_requested`) and the
   worker's latch pointer, so backends can hand work to the worker;
+- the `debug` flag toggled by `pgbully.set_debug()`;
 - monitoring counters.
 
 Everything mutable is guarded by `PgbShared->lock`. Both the worker and any
@@ -74,6 +76,11 @@ Each handler updates `PgbShared` under the lock and sets the worker's latch so
 the worker reacts promptly. Reusing SQL-over-libpq means pgBully inherits
 PostgreSQL's authentication, TLS, and connection handling for free.
 
+A handler also records that the sender is alive. This matters because the
+worker only learns of liveness by probing, and a follower never probes
+anyone — without it, a follower would report the leader whose heartbeats it is
+receiving as unreachable.
+
 The same file exposes the read-only monitoring functions
 (`status`, `peers`, `leader`, `state`, …) and the `force_election()` control.
 
@@ -89,6 +96,26 @@ all connections on config reload. Every call is bounded by:
 
 so a dead or hung peer can never wedge the worker. A failed call simply marks
 the peer unreachable for that round.
+
+## 5. Cluster-manager interface (`src/cluster_api.c`)
+
+The same shared-memory state, projected through the vendor-neutral interface a
+control plane expects from any consensus backend —
+`pgbully.get_cluster_status()`, `pgbully.get_nodes()`, `pgbully.add_node()`
+and the rest, plus the etcd-style views built on them. See
+[cluster-api.md](cluster-api.md).
+
+It is a projection, not a second source of truth: every function reads the
+same `PgbShared` block under the same lock. Two details are translated on the
+way out — a node's `address` and `port` are recovered from its conninfo
+through libpq, and the internal `waiting` state is reported as `candidate`,
+since the interface knows only leader, follower and candidate.
+
+The interface also covers a replicated log and a key/value store, which the
+Bully algorithm does not provide. Those functions are declared with their full
+signatures and share one implementation that raises
+`ERRCODE_FEATURE_NOT_SUPPORTED`, so a caller probing for the capability gets
+an answer it can catch rather than "function does not exist".
 
 ## Configuration plumbing (`src/config.c`)
 
