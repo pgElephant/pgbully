@@ -237,22 +237,106 @@ pgbully_send_coordinator(const PgbPeer *peer, int32 leader_id, int64 term)
 
 PgbRpcResult
 pgbully_send_heartbeat(const PgbPeer *peer, int32 leader_id, int64 term,
-                       int64 *peer_term_out)
+                       int64 kv_version, int64 *peer_term_out)
 {
     char        a[16];
     char        b[24];
+    char        c[24];
     char        buf[24];
-    const char *params[2];
+    const char *params[3];
     PgbRpcResult rc;
 
     snprintf(a, sizeof(a), "%d", leader_id);
     snprintf(b, sizeof(b), INT64_FORMAT, term);
+    snprintf(c, sizeof(c), INT64_FORMAT, kv_version);
     params[0] = a;
     params[1] = b;
+    params[2] = c;
 
-    rc = call_scalar(peer, "SELECT pgbully.rpc_heartbeat($1, $2)",
-                     2, params, buf, sizeof(buf));
+    rc = call_scalar(peer, "SELECT pgbully.rpc_heartbeat($1, $2, $3)",
+                     3, params, buf, sizeof(buf));
     if (rc == PGB_RPC_OK && peer_term_out)
         *peer_term_out = (int64) strtoll(buf, NULL, 10);
     return rc;
+}
+
+/* -------------------------------------------------------------------------
+ * Key/value replication
+ *
+ * These two run in an ordinary backend rather than in the worker.  That is
+ * safe because the connection cache above is file-static and therefore
+ * process-local: a backend that pushes a write simply builds up its own
+ * connections, quite separate from the worker's.
+ * ------------------------------------------------------------------------- */
+
+/*
+ * Push one applied key/value row to a peer.  The peer decides whether to
+ * accept it; a stale term or an older version is silently ignored there.
+ */
+PgbRpcResult
+pgbully_send_kv_apply(const PgbPeer *peer, const char *key, const char *value,
+                      bool deleted, int64 version, int64 term)
+{
+    char        v[24];
+    char        t[24];
+    const char *params[5];
+
+    snprintf(v, sizeof(v), INT64_FORMAT, version);
+    snprintf(t, sizeof(t), INT64_FORMAT, term);
+
+    params[0] = key;
+    params[1] = value;               /* NULL for a tombstone */
+    params[2] = deleted ? "t" : "f";
+    params[3] = v;
+    params[4] = t;
+
+    return call_scalar(peer,
+                       "SELECT pgbully.rpc_kv_apply($1, $2, $3, $4, $5)",
+                       5, params, NULL, 0);
+}
+
+/*
+ * Fetch every row a peer has applied after from_version.  On success
+ * *result_out holds a PGresult of (key, value, deleted, version) that the
+ * caller must PQclear().
+ */
+PgbRpcResult
+pgbully_fetch_kv_since(const PgbPeer *peer, int64 from_version,
+                       void **result_out)
+{
+    PGconn     *conn;
+    PGresult   *res;
+    char        v[24];
+    const char *params[1];
+
+    *result_out = NULL;
+
+    conn = get_conn(peer);
+    if (conn == NULL)
+        return PGB_RPC_UNREACHABLE;
+
+    snprintf(v, sizeof(v), INT64_FORMAT, from_version);
+    params[0] = v;
+
+    res = PQexecParams(conn,
+                       "SELECT key, value, deleted, version"
+                       " FROM pgbully.rpc_kv_since($1) ORDER BY version",
+                       1, NULL, params, NULL, NULL, 0);
+
+    if (PQresultStatus(res) != PGRES_TUPLES_OK)
+    {
+        PgbConn    *slot;
+
+        PQclear(res);
+        slot = cache_slot(peer->node_id);
+        if (slot && slot->conn)
+        {
+            PQfinish(slot->conn);
+            slot->conn = NULL;
+        }
+        return PGB_RPC_UNREACHABLE;
+    }
+
+    *result_out = res;
+    return PGB_RPC_OK;
 }

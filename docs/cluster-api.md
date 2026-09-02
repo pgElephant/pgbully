@@ -3,8 +3,14 @@
 pgBully's native functions live in the `pgbully` schema and are shaped around
 the Bully algorithm — see [api.md](api.md). Alongside them, pgBully implements
 the vendor-neutral interface that cluster managers and control planes expect
-from any PostgreSQL consensus backend, so an application written against that
-interface runs on pgBully without changes.
+from any PostgreSQL consensus backend, so an application that only needs to
+know who leads runs on pgBully without changes.
+
+That interface also covers a replicated key/value store, and pgBully provides
+one — with weaker guarantees than a quorum system can offer, spelled out in
+[the key/value store](#the-keyvalue-store) below. It does not provide the
+log-replication functions: without a quorum there is nothing meaningful to put
+behind them.
 
 Everything lives in the `pgbully` schema — functions, views and tables alike.
 The schema *is* the namespace, so nothing carries a redundant `pgbully_`
@@ -162,15 +168,12 @@ Columns are `cmd_position`, `command_type`, `node_id`, `address`, `port`,
 | `pgbully.member_list_legacy` | the same, built from `pgbully.get_nodes()` |
 | `pgbully.endpoint_status` | `etcdctl endpoint status` |
 | `pgbully.endpoint_health` | `etcdctl endpoint health` |
-| `pgbully.endpoint_hashkv` | `etcdctl endpoint hashkv` |
 | `pgbully.cluster_health` | `etcdctl cluster-health` |
 | `pgbully.cluster_info` | cluster identity and size |
 | `pgbully.member_details` | per-member detail |
 | `pgbully.alarm_list` | alarm listing (always `NONE`) |
 | `pgbully.auth_status` | authentication status |
 | `pgbully.kv_status` | key/value summary |
-| `pgbully.watch_status` | watcher summary |
-| `pgbully.snapshot_status` | snapshot summary |
 
 `pgbully.member_list` is the useful one day to day:
 
@@ -192,66 +195,148 @@ SELECT * FROM pgbully.member_list;
 | `pgbully.cluster_overview` | The same, trimmed to the columns a dashboard needs |
 | `pgbully.worker_status` | `worker_state`, `is_running` |
 | `pgbully.nodes` | `pgbully.get_nodes()` plus the current term and state |
-| `pgbully.log_status` | Always an empty log — see below |
-| `pgbully.kv_store_status` | Raises on select — see below |
+| `pgbully.kv_store_status` | key/value store health: entry counts, operation counters, version |
 
-Two names need a word of warning:
-
-- **`pgbully.nodes`** is both this view and the membership setting. They live
-  in different namespaces and never collide in practice —
-  `SELECT * FROM pgbully.nodes` reads the view, `SHOW pgbully.nodes` reads the
-  setting — but they are not the same object.
-- **`pgbully.kv_status`** is the etcd-style summary above.
-  **`pgbully.kv_store_status`** is the key/value store's own health view, which
-  raises because pgBully has no key/value store.
+One name needs a word of warning: **`pgbully.nodes`** is both this view and
+the membership setting. They live in different namespaces and never collide in
+practice — `SELECT * FROM pgbully.nodes` reads the view, `SHOW pgbully.nodes`
+reads the setting — but they are not the same object.
 
 ---
 
-## Log replication and the key/value store
+## The key/value store
 
-The Bully algorithm elects a leader. It does not replicate a log and it has no
-key/value store, so pgBully cannot implement those parts of the interface.
+A small replicated store for cluster-scoped configuration — which node is
+active, where a job should run — that any node can read locally without a
+round trip.
 
-They are still **declared**, with their full signatures, so that a caller
-which probes for them or prepares a statement against them gets a precise,
-catchable failure instead of `function does not exist`:
+### What it guarantees, and what it does not
 
-```
-ERROR:  pgbully.kv_put() is not supported by pgbully
-DETAIL: pgBully elects a leader; it has no replicated log and no key/value store.
-HINT:   Applications that need replicated state must use a backend that
-        provides it.
-```
+pgBully elects a leader. It has no quorum and no replicated log, so the store
+cannot offer what a Raft-backed one does. It offers this instead:
 
-The SQLSTATE is `0A000` (`feature_not_supported`), so an application can
-detect the missing capability without parsing text:
+| | |
+|---|---|
+| **Writes** | Accepted **only on the leader**. A write on a follower raises, naming the leader, rather than being forwarded — so you always know which node took your data. |
+| **Ordering** | Every write takes the next version from a counter the leader owns and carries the term it was written under. A peer applies a row only if the term is at least its own and the version beats what it holds, so a deposed leader's late writes are dropped on arrival. |
+| **Replication** | The writing backend pushes the row to every reachable peer before returning. Best effort: an unreachable peer does not fail the write. |
+| **Catch-up** | The leader advertises its version on every heartbeat. A follower that is behind pulls what it missed before answering a read; a follower that is *ahead* — because it led while the current leader was down — pushes what the leader is missing. A node that was down heals in both directions. |
+| **Reads** | Local, and so may be stale by up to one heartbeat. |
+
+> **This is not a quorum store.** A write is durable on the leader and best
+> effort everywhere else, so a network partition can strand recent writes on
+> the side that loses the election. Do not put anything in it that you cannot
+> afford to lose.
+
+### `pgbully.kv_put(key text, value text) → boolean`
+
+Store a key. Leader only.
 
 ```sql
-DO $$
-BEGIN
-    PERFORM pgbully.kv_put('k', 'v');
-EXCEPTION WHEN feature_not_supported THEN
-    RAISE NOTICE 'this backend elects a leader only';
-END $$;
+SELECT pgbully.kv_put('app/mode', 'active');
 ```
 
-Functions that raise:
+On a follower:
 
-- **Log** — `pgbully.log_append`, `pgbully.log_commit`, `pgbully.log_apply`,
-  `pgbully.log_get_entry`, `pgbully.log_get_stats`,
-  `pgbully.log_get_replication_status`, `pgbully.log_sync_with_leader`,
-  `pgbully.replicate_entry`, `pgbully.get_applied_index`,
-  `pgbully.record_applied_index`
-- **Key/value** — `pgbully.kv_put`, `pgbully.kv_get`, `pgbully.kv_delete`,
-  `pgbully.kv_exists`, `pgbully.kv_list_keys`, `pgbully.kv_get_stats`,
-  `pgbully.kv_compact`, `pgbully.kv_reset`, `pgbully.kv_put_local`,
-  `pgbully.kv_delete_local`
+```
+ERROR:  cannot store a key: this node is not the leader
+DETAIL: Node 2 currently leads the cluster.
+HINT:   Key/value writes must be issued on the leader.
+```
 
-`pgbully.log_status` is the one exception: it reports an empty log rather than
-raising, so a monitoring query that selects from it keeps working.
+A `NULL` value is stored as `NULL`, which is distinct from the key being
+absent — use `pgbully.kv_exists()` to tell them apart.
 
-The tables `pgbully.kv`, `pgbully.applied_entries` and
-`pgbully.log_index_mapping` exist for schema compatibility and stay empty.
+### `pgbully.kv_get(key text) → text`
+
+Read a key from this node, or `NULL` if it is not there. Works on any node,
+and catches up from the leader first if this node has fallen behind.
+
+### `pgbully.kv_delete(key text) → boolean`
+
+Delete a key. Leader only. Returns `false` if the key was not there.
+
+The row becomes a tombstone rather than disappearing, because a row that is
+gone cannot be replicated — a follower would otherwise never learn of the
+deletion. `pgbully.kv_compact()` clears them.
+
+### `pgbully.kv_exists(key text) → boolean`
+
+Whether the key is present on this node. Catches up first, like `kv_get()`.
+
+### `pgbully.kv_list_keys() → text`
+
+The live keys as a JSON array, in key order:
+
+```sql
+SELECT pgbully.kv_list_keys();
+ ["app/mode","app/owner"]
+```
+
+### `pgbully.kv_get_stats() → record`
+
+| Column | Type | Notes |
+|---|---|---|
+| `num_entries` | `integer` | Rows in the table, tombstones included |
+| `total_operations` | `bigint` | Puts + deletes + gets since this node started |
+| `last_applied_index` | `bigint` | The store's version on this node |
+| `puts` / `deletes` / `gets` | `bigint` | Per-operation counters since startup |
+| `active_entries` | `integer` | Live keys |
+| `deleted_entries` | `integer` | Tombstones awaiting compaction |
+
+The counters live in shared memory and reset when PostgreSQL restarts;
+`last_applied_index` does not, because it is re-seeded from the table.
+
+### `pgbully.kv_compact() → boolean`
+
+Drop tombstones, which is what keeps a delete-heavy store from growing
+forever. Leader only. Only rows below the current version go, so the version
+never moves backwards.
+
+A `NOTICE` names the version compacted to: a peer that has not caught up past
+it will never learn of those deletions. Compact when the cluster is healthy,
+not while a node is down.
+
+### `pgbully.kv_reset() → boolean`
+
+Empty the store on this node and every reachable peer. Leader only,
+superuser-only, and exactly as blunt as it sounds.
+
+### `pgbully.kv_sync() → bigint`
+
+Pull from the leader now instead of waiting for the next read, and return the
+version this node ends up at. Useful right after a node rejoins, and in tests
+that cannot wait a heartbeat.
+
+### The table
+
+The rows live in `pgbully.kv`, which you can read directly:
+
+```sql
+SELECT key, value, version, term, updated_at
+FROM   pgbully.kv
+WHERE  NOT deleted
+ORDER  BY key;
+```
+
+It is marked as extension configuration, so `pg_dump` includes its contents.
+Write to it only through the functions above — a direct `INSERT` is not
+replicated and does not move the version counter.
+
+---
+
+## What is not here
+
+The interface also covers log replication: `log_append()`, `log_commit()`,
+`log_apply()`, `log_get_stats()`, `replicate_entry()` and applied-index
+tracking. pgBully does not implement them, and does not declare them either.
+Calling one is a plain `undefined_function` (SQLSTATE `42883`).
+
+There is nothing to put behind them. A replicated log is only worth the name
+if a quorum agrees on its order, and the Bully algorithm establishes which
+node leads, not what a majority has durably accepted. The key/value store
+above is what can honestly be built on leader election alone; an application
+that needs a real log needs a consensus backend.
 
 ---
 

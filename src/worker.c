@@ -384,6 +384,7 @@ send_heartbeats(void)
     int         npeers;
     int32       my_id;
     int64       term;
+    int64       kv_version;
     bool        step_down = false;
     int64       observed_term = 0;
     int         sent = 0;
@@ -392,6 +393,11 @@ send_heartbeats(void)
     LWLockAcquire(PgbCtl->lock, LW_SHARED);
     my_id = PgbCtl->my_node_id;
     term = PgbCtl->term;
+    /*
+     * Ride along with the heartbeat: a follower compares this to its own
+     * applied version and pulls what it missed if it has fallen behind.
+     */
+    kv_version = PgbCtl->kv_version;
     npeers = PgbCtl->npeers;
     memcpy(peers, PgbCtl->peers, sizeof(PgbPeer) * npeers);
     LWLockRelease(PgbCtl->lock);
@@ -406,7 +412,8 @@ send_heartbeats(void)
 
         CHECK_FOR_INTERRUPTS();
 
-        rc = pgbully_send_heartbeat(&peers[i], my_id, term, &peer_term);
+        rc = pgbully_send_heartbeat(&peers[i], my_id, term, kv_version,
+                                    &peer_term);
         update_peer_status(peers[i].node_id, rc == PGB_RPC_OK);
 
         if (rc == PGB_RPC_OK)

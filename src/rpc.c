@@ -187,13 +187,24 @@ pgbully_rpc_heartbeat(PG_FUNCTION_ARGS)
 {
     int32       leader = PG_GETARG_INT32(0);
     int64       term = PG_GETARG_INT64(1);
+    int64       leader_kv = PG_ARGISNULL(2) ? 0 : PG_GETARG_INT64(2);
     int64       cur;
+    int64       our_kv;
+    bool        leader_behind;
 
     require_shmem();
 
     LWLockAcquire(PgbCtl->lock, LW_EXCLUSIVE);
     PgbCtl->heartbeats_recv++;
     mark_peer_seen(leader);
+
+    /*
+     * Remember how far ahead the leader's key/value store is.  A reader on
+     * this node compares the two and catches up before answering.
+     */
+    if (leader != PgbCtl->my_node_id && leader_kv > PgbCtl->leader_kv_version)
+        PgbCtl->leader_kv_version = leader_kv;
+    our_kv = PgbCtl->kv_version;
 
     if (term > PgbCtl->term)
     {
@@ -215,9 +226,19 @@ pgbully_rpc_heartbeat(PG_FUNCTION_ARGS)
         PgbCtl->election_requested = true;
 
     cur = PgbCtl->term;
+    leader_behind = (leader != PgbCtl->my_node_id && our_kv > leader_kv);
     LWLockRelease(PgbCtl->lock);
 
     wake_worker();
+
+    /*
+     * A leader that won on its node id can still be behind on data -- it may
+     * have been down while the rest of the cluster kept writing.  Hand it what
+     * it is missing rather than letting those rows quietly disappear.
+     */
+    if (leader_behind)
+        pgbully_kv_offer_to_leader(leader, leader_kv);
+
     PG_RETURN_INT64(cur);
 }
 

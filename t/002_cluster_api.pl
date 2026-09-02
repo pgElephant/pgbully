@@ -143,10 +143,9 @@ is($n1->safe_psql('postgres',
 foreach my $view (
     qw(pgbully.member_list pgbully.member_list_legacy pgbully.endpoint_status
        pgbully.endpoint_health pgbully.cluster_health pgbully.cluster_info
-       pgbully.kv_status pgbully.endpoint_hashkv pgbully.watch_status
-       pgbully.member_details pgbully.auth_status pgbully.alarm_list
-       pgbully.snapshot_status pgbully.cluster_state pgbully.worker_status
-       pgbully.cluster_overview pgbully.nodes pgbully.log_status))
+       pgbully.kv_status pgbully.kv_store_status pgbully.member_details
+       pgbully.auth_status pgbully.alarm_list pgbully.cluster_state
+       pgbully.worker_status pgbully.cluster_overview pgbully.nodes))
 {
     my ($rc, $out, $err) = $n1->psql('postgres', "SELECT * FROM $view");
     is($rc, 0, "$view is selectable");
@@ -170,33 +169,98 @@ isnt(sqlstate_of($n1, 'PERFORM pgbully.remove_node(1)'), 'no-error',
     'a node cannot remove itself');
 
 # ---------------------------------------------------------------------------
-# 6. Log and key/value: present, and refusing clearly
+# 6. The key/value store
 # ---------------------------------------------------------------------------
-foreach my $call (
-    "PERFORM pgbully.log_append(1, 'x')",
-    "PERFORM pgbully.log_commit(1)",
-    "PERFORM pgbully.log_apply(1)",
-    "PERFORM pgbully.log_get_entry(1)",
-    "PERFORM * FROM pgbully.log_get_stats()",
-    "PERFORM * FROM pgbully.log_get_replication_status()",
-    "PERFORM pgbully.log_sync_with_leader()",
-    "PERFORM pgbully.replicate_entry('x')",
-    "PERFORM pgbully.get_applied_index()",
-    "PERFORM pgbully.record_applied_index(1)",
-    "PERFORM pgbully.kv_put('k', 'v')",
-    "PERFORM pgbully.kv_get('k')",
-    "PERFORM pgbully.kv_delete('k')",
-    "PERFORM pgbully.kv_exists('k')",
-    "PERFORM pgbully.kv_list_keys()",
-    "PERFORM * FROM pgbully.kv_get_stats()",
-    "PERFORM pgbully.kv_compact()",
-    "PERFORM pgbully.kv_reset()",
-    "PERFORM pgbully.kv_put_local('k', 'v')",
-    "PERFORM pgbully.kv_delete_local('k')")
+
+# n2 leads, so n1 must refuse a write and say who to ask.
+my ($rc6, $out6, $err6) = $n1->psql('postgres', "SELECT pgbully.kv_put('a', '1')");
+isnt($rc6, 0, 'a write on a follower is refused');
+like($err6, qr/not the leader/, 'the refusal says this node is not the leader');
+like($err6, qr/Node 2 currently leads/, 'and names the leader');
+
+is($n2->safe_psql('postgres', "SELECT pgbully.kv_put('app/mode', 'active')"),
+    't', 'the leader accepts a write');
+is($n2->safe_psql('postgres', "SELECT pgbully.kv_get('app/mode')"),
+    'active', 'the leader reads it back');
+
+# The write is pushed before kv_put() returns, so it is already on n1.
+is($n1->safe_psql('postgres', "SELECT pgbully.kv_get('app/mode')"),
+    'active', 'the follower has it without waiting');
+is($n1->safe_psql('postgres', "SELECT pgbully.kv_exists('app/mode')"),
+    't', 'kv_exists() agrees');
+is($n1->safe_psql('postgres', "SELECT pgbully.kv_exists('nope')"),
+    'f', 'and says so for a key that is not there');
+
+$n2->safe_psql('postgres', "SELECT pgbully.kv_put('app/owner', 'node2')");
+is($n1->safe_psql('postgres', 'SELECT pgbully.kv_list_keys()'),
+    '["app/mode","app/owner"]', 'kv_list_keys() returns a JSON array, in order');
+
+is($n2->safe_psql('postgres', "SELECT pgbully.kv_delete('app/owner')"),
+    't', 'the leader deletes a key');
+is($n2->safe_psql('postgres', "SELECT pgbully.kv_delete('app/owner')"),
+    'f', 'deleting it again reports it was not there');
+is($n1->safe_psql('postgres',
+        "SELECT coalesce(pgbully.kv_get('app/owner'), 'gone')"),
+    'gone', 'the deletion reached the follower');
+
+# A row from a term older than ours is a deposed leader talking; drop it.
+my $term = $n1->safe_psql('postgres', 'SELECT pgbully.term()');
+$n1->safe_psql('postgres',
+    "SELECT pgbully.rpc_kv_apply('stale', 'ghost', false, 999999, 0)");
+is($n1->safe_psql('postgres', "SELECT coalesce(pgbully.kv_get('stale'), 'gone')"),
+    'gone', 'a write stamped with a stale term is fenced out');
+$n1->safe_psql('postgres',
+    "SELECT pgbully.rpc_kv_apply('fenced', 'ok', false, 999999, $term)");
+is($n1->safe_psql('postgres', "SELECT coalesce(pgbully.kv_get('fenced'), 'gone')"),
+    'ok', 'the same write in the current term is accepted');
+
+my $stats = $n2->safe_psql('postgres',
+    'SELECT active_entries > 0 AND puts > 0 FROM pgbully.kv_get_stats()');
+is($stats, 't', 'kv_get_stats() reports real numbers');
+
+isnt($n2->safe_psql('postgres',
+        'SELECT last_applied_index FROM pgbully.kv_get_stats()'),
+    '0', 'the store has a non-zero version');
+
+# Reset clears every reachable node, not just the leader.
+$n2->safe_psql('postgres', 'SELECT pgbully.kv_reset()');
+is($n2->safe_psql('postgres', 'SELECT pgbully.kv_list_keys()'),
+    '[]', 'kv_reset() empties the leader');
+is($n1->safe_psql('postgres', 'SELECT pgbully.kv_list_keys()'),
+    '[]', 'and the follower');
+
+# The log half of the interface is absent, not stubbed.
+foreach my $fn (
+    'pgbully.log_append(bigint, text)', 'pgbully.log_commit(bigint)',
+    'pgbully.log_apply(bigint)', 'pgbully.log_get_stats()',
+    'pgbully.replicate_entry(text)', 'pgbully.get_applied_index()')
 {
-    my ($fn) = $call =~ /(pgbully\.\w+)/;
-    is(sqlstate_of($n1, $call), '0A000', "$fn raises feature_not_supported");
+    is($n1->safe_psql('postgres',
+            "SELECT to_regprocedure('$fn') IS NULL"),
+        't', "$fn is not declared");
 }
+
+# ---------------------------------------------------------------------------
+# 6b. A node that was down does not take the cluster backwards
+# ---------------------------------------------------------------------------
+$n2->safe_psql('postgres', "SELECT pgbully.kv_put('k1', 'v1')");
+
+$n2->stop('immediate');
+ok(wait_for($n1, 'SELECT pgbully.is_leader()', 't', 'kv failover'),
+    'node 1 takes over so it can write');
+$n1->safe_psql('postgres', "SELECT pgbully.kv_put('k2', 'written-while-2-was-down')");
+
+$n2->start;
+ok(wait_for($n2, 'SELECT pgbully.is_leader()', 't', 'kv reclaim'),
+    'node 2 bullies its way back to leader');
+
+# Node 2 won on its id, not on how current its store was. Node 1 must hand
+# back what it is missing, or k2 is silently lost.
+ok(wait_for($n2, "SELECT coalesce(pgbully.kv_get('k2'), 'LOST')",
+        'written-while-2-was-down', 'kv reconcile'),
+    'the write made while node 2 was down survives its return');
+is($n2->safe_psql('postgres', "SELECT pgbully.kv_get('k1')"),
+    'v1', 'and the older key is still there');
 
 # ---------------------------------------------------------------------------
 # 7. Failover is visible through the interface

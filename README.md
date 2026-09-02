@@ -154,9 +154,19 @@ SELECT * FROM pgbully.member_list;      -- etcdctl-style member listing
 SELECT pgbully.is_leader(), pgbully.get_leader(), pgbully.get_term();
 ```
 
-Log-replication and key/value entry points are part of that interface and the
-Bully algorithm has no equivalent, so they are declared but raise
-`feature_not_supported` (`0A000`) rather than failing as missing functions.
+It also brings a small replicated key/value store for cluster-scoped
+configuration — writes on the leader, local reads everywhere, and a node that
+was down heals itself when it returns:
+
+```sql
+SELECT pgbully.kv_put('app/mode', 'active');   -- leader only
+SELECT pgbully.kv_get('app/mode');             -- any node, local read
+```
+
+It is not a quorum store: a write is durable on the leader and best effort on
+the followers, so a partition can strand recent writes. The
+[guarantees are spelled out](docs/cluster-api.md#what-it-guarantees-and-what-it-does-not)
+in full.
 
 Full reference: [docs/cluster-api.md](docs/cluster-api.md).
 

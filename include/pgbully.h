@@ -102,8 +102,22 @@ typedef struct PgbShared
      */
     bool            election_requested; /* a lower node asked us to run one */
 
-    /* Verbose worker logging, toggled by pgbully_set_debug(). */
+    /* Verbose worker logging, toggled by pgbully.set_debug(). */
     bool            debug;
+
+    /*
+     * Key/value store bookkeeping.  The rows themselves live in the
+     * pgbully.kv table; these are the numbers the worker needs to see without
+     * a database connection of its own.
+     *
+     * kv_version is the highest version this node has applied.  Backends
+     * maintain it: the leader's kv_put()/kv_delete() bump it, a follower's
+     * rpc_kv_apply() raises it.  The leader advertises it on every heartbeat
+     * so a follower can tell it has fallen behind and pull what it missed.
+     */
+    int64           kv_version;         /* highest version applied here */
+    int64           leader_kv_version;  /* last version the leader advertised */
+    bool            kv_seeded;          /* kv_version re-read from the table */
 
     int32           npeers;
     PgbPeer         peers[PGBULLY_MAX_NODES];
@@ -114,6 +128,9 @@ typedef struct PgbShared
     int64           heartbeats_sent;
     int64           heartbeats_recv;
     int64           coordinators_recv;
+    int64           kv_puts;
+    int64           kv_deletes;
+    int64           kv_gets;
 } PgbShared;
 
 /* ---- GUC-backed configuration (defined in config.c) ---- */
@@ -152,7 +169,34 @@ extern PgbRpcResult pgbully_send_coordinator(const PgbPeer *peer,
                                              int32 leader_id, int64 term);
 extern PgbRpcResult pgbully_send_heartbeat(const PgbPeer *peer,
                                            int32 leader_id, int64 term,
+                                           int64 kv_version,
                                            int64 *peer_term_out);
+
+/*
+ * Key/value replication.  Unlike the calls above, these run in an ordinary
+ * backend rather than the worker: the leader's kv_put() pushes each write
+ * out, and a follower that has fallen behind pulls the rows it missed.  The
+ * connection cache is process-local, so a backend simply keeps its own.
+ *
+ * pgbully_fetch_kv_since() hands back a PGresult the caller must PQclear();
+ * it is declared void * so that libpq-fe.h stays out of this header.
+ */
+extern PgbRpcResult pgbully_send_kv_apply(const PgbPeer *peer,
+                                          const char *key, const char *value,
+                                          bool deleted, int64 version,
+                                          int64 term);
+extern PgbRpcResult pgbully_fetch_kv_since(const PgbPeer *peer,
+                                           int64 from_version,
+                                           void **result_out);
+
+/* ---- kv.c ---- */
+
+/*
+ * Called from the heartbeat handler when the leader advertises a version
+ * lower than ours: it took the election on its id, not on how current its
+ * store is, so we hand it what it is missing.
+ */
+extern void pgbully_kv_offer_to_leader(int32 leader_id, int64 leader_version);
 extern PgbRpcResult pgbully_send_ping(const PgbPeer *peer, int32 *peer_id_out);
 extern void pgbully_transport_reset(void);  /* drop all cached connections */
 
@@ -166,7 +210,9 @@ extern const char *pgbully_state_name(PgbState s);
 /*
  * cluster_api.c implements the standard cluster-management interface
  * (pgbully.init(), pgbully.get_cluster_status(), ...) on top of the state
- * above.  It needs no exports beyond the SQL-callable functions themselves.
+ * above, and kv.c the leader-owned key/value store (pgbully.kv_put() and
+ * friends).  Everything either exposes is SQL-callable, so neither needs an
+ * entry here.
  */
 
 #endif                          /* PGBULLY_H */

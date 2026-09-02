@@ -7,7 +7,7 @@ PGFILEDESC  = "pgBully - distributed leader election (Bully algorithm) for Postg
 
 MODULE_big  = pgbully
 OBJS        = src/pgbully.o src/config.o src/shmem.o src/transport.o src/worker.o src/rpc.o \
-              src/cluster_api.o
+              src/cluster_api.o src/kv.o
 
 DATA        = sql/pgbully--1.0.sql
 

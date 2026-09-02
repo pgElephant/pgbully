@@ -56,20 +56,22 @@ cluster-manager interface — `pgbully.get_cluster_status()`,
 rest — so an application written against that interface runs on pgBully
 unchanged. See [cluster-api.md](cluster-api.md).
 
-The parts of that interface covering a replicated log and a key/value store
-have no equivalent in the Bully algorithm. Those functions exist, so a caller
-probing for them gets a definite answer, but every one raises
-`feature_not_supported` (SQLSTATE `0A000`) rather than pretending to work. An
-application can catch that and fall back:
+### Does it have a key/value store?
 
-```sql
-DO $$
-BEGIN
-    PERFORM pgbully.kv_put('k', 'v');
-EXCEPTION WHEN feature_not_supported THEN
-    RAISE NOTICE 'this backend elects a leader only';
-END $$;
-```
+Yes, with weaker guarantees than a Raft-backed one. Writes are accepted only
+on the leader, stamped with the term and a version, and pushed to every
+reachable peer; reads are local on any node; a node that was down catches up
+when it returns. It is not quorum-replicated, so a partition can strand recent
+writes on the losing side. Good for cluster-scoped configuration, wrong for
+anything you cannot lose. See
+[the key/value store](cluster-api.md#the-keyvalue-store).
+
+### Does it replicate a log?
+
+No. `log_append()`, `log_commit()` and the rest of that interface are not
+implemented and not declared. A replicated log is only worth the name if a
+quorum agrees on its order, and the Bully algorithm settles which node leads,
+not what a majority has durably accepted.
 
 ### Does pgBully move data, promote replicas, or fence writes?
 

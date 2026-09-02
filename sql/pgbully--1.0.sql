@@ -24,9 +24,25 @@ CREATE FUNCTION pgbully.rpc_coordinator(leader_id integer, term bigint)
     AS 'MODULE_PATHNAME', 'pgbully_rpc_coordinator'
     LANGUAGE C;
 
-CREATE FUNCTION pgbully.rpc_heartbeat(leader_id integer, term bigint)
+CREATE FUNCTION pgbully.rpc_heartbeat(leader_id integer, term bigint,
+                                      kv_version bigint DEFAULT 0)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pgbully_rpc_heartbeat'
+    LANGUAGE C;
+
+CREATE FUNCTION pgbully.rpc_kv_apply(key text, value text, deleted boolean,
+                                     version bigint, term bigint)
+    RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pgbully_rpc_kv_apply'
+    LANGUAGE C;
+
+CREATE FUNCTION pgbully.rpc_kv_since(from_version bigint,
+    OUT key      text,
+    OUT value    text,
+    OUT deleted  boolean,
+    OUT version  bigint)
+    RETURNS SETOF record
+    AS 'MODULE_PATHNAME', 'pgbully_rpc_kv_since'
     LANGUAGE C;
 
 -- ---------------------------------------------------------------------------
@@ -103,7 +119,9 @@ CREATE VIEW pgbully.cluster AS
 REVOKE ALL ON FUNCTION pgbully.rpc_ping() FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.rpc_election(integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.rpc_coordinator(integer, bigint) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.rpc_heartbeat(integer, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgbully.rpc_heartbeat(integer, bigint, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgbully.rpc_kv_apply(text, text, boolean, bigint, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgbully.rpc_kv_since(bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.force_election() FROM PUBLIC;
 
 -- ===========================================================================
@@ -120,44 +138,13 @@ REVOKE ALL ON FUNCTION pgbully.force_election() FROM PUBLIC;
 --      pgbully.member_list            etcd-style member listing
 --      pgbully.cluster_state          shared-memory state as a view
 --
--- The interface also covers log replication and a key/value store, neither of
--- which the Bully algorithm provides.  Those functions are still declared,
--- with their full signatures, so that a caller which probes for them or
--- prepares a statement against them gets a precise, catchable error
--- (ERRCODE_FEATURE_NOT_SUPPORTED) instead of "function does not exist".
--- Every one of them raises.
+-- The interface also covers log replication and a key/value store.  pgBully
+-- elects a leader and nothing else, so it does not carry those: there is no
+-- pgbully.kv_put(), no pgbully.log_append(), and no tables behind them.  A
+-- caller that needs replicated state wants a different backend, and finding
+-- out at CREATE EXTENSION time beats finding out from a function that exists
+-- only to refuse.
 -- ===========================================================================
-
--- ===========================================================================
--- Replication tables
---
--- A backend with a replicated log populates these from its apply loop.
--- pgBully has no apply loop, so they exist for schema compatibility and
--- stay empty.
--- ===========================================================================
-
-CREATE TABLE IF NOT EXISTS pgbully.kv (
-    key         TEXT PRIMARY KEY,
-    value       TEXT NOT NULL,
-    version     BIGINT NOT NULL DEFAULT 1,
-    created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS pgbully.applied_entries (
-    raft_index  BIGINT PRIMARY KEY,
-    raft_term   BIGINT NOT NULL,
-    entry_type  INTEGER NOT NULL,
-    applied_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS pgbully.log_index_mapping (
-    raft_index      BIGINT PRIMARY KEY,
-    operation_type  TEXT NOT NULL,
-    target_table    TEXT,
-    operation_data  JSONB,
-    applied_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
 
 -- ===========================================================================
 -- Core cluster functions
@@ -277,141 +264,6 @@ CREATE FUNCTION pgbully.get_queue_status()
     LANGUAGE C;
 
 -- ===========================================================================
--- Log replication -- not implemented by the Bully algorithm
---
--- Declared with their full signatures; every one raises
--- ERRCODE_FEATURE_NOT_SUPPORTED naming the function that was called.
--- ===========================================================================
-
-CREATE FUNCTION pgbully.log_append(term bigint, data text)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.log_commit(index bigint)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.log_apply(index bigint)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.log_get_entry(index bigint)
-    RETURNS text
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.log_get_stats()
-    RETURNS TABLE(
-        log_size      bigint,
-        last_index    bigint,
-        commit_index  bigint,
-        last_applied  bigint,
-        replicated    bigint,
-        committed     bigint,
-        applied       bigint,
-        errors        bigint)
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.log_get_replication_status()
-    RETURNS TABLE(
-        log_size      bigint,
-        last_index    bigint,
-        commit_index  bigint,
-        last_applied  bigint,
-        replicated    bigint,
-        committed     bigint,
-        applied       bigint,
-        errors        bigint)
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.log_sync_with_leader()
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.replicate_entry(entry_data text)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.get_applied_index()
-    RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.record_applied_index(index bigint)
-    RETURNS void
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
--- ===========================================================================
--- Key/value store -- not implemented by the Bully algorithm
--- ===========================================================================
-
-CREATE FUNCTION pgbully.kv_put(key text, value text)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.kv_get(key text)
-    RETURNS text
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.kv_delete(key text)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.kv_exists(key text)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.kv_list_keys()
-    RETURNS text
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.kv_get_stats()
-    RETURNS TABLE(
-        num_entries         integer,
-        total_operations    bigint,
-        last_applied_index  bigint,
-        puts                bigint,
-        deletes             bigint,
-        gets                bigint,
-        active_entries      integer,
-        deleted_entries     integer)
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.kv_compact()
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.kv_reset()
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.kv_put_local(key text, value text)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
-CREATE FUNCTION pgbully.kv_delete_local(key text)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pgbully_unsupported'
-    LANGUAGE C;
-
--- ===========================================================================
 -- etcd-compatible views
 -- ===========================================================================
 
@@ -484,32 +336,6 @@ SELECT
     c.heartbeats_sent::text AS "raftAppliedIndex"
 FROM pgbully.get_cluster_status() c;
 
-CREATE VIEW pgbully.kv_status AS
-SELECT
-    'pgbully' AS "key",
-    'PostgreSQL Bully Leader Election Extension' AS "value",
-    '0' AS "version",
-    '0' AS "create_revision",
-    '0' AS "mod_revision"
-WHERE pgbully.is_leader();
-
--- 'etcdctl endpoint hashkv'
-CREATE VIEW pgbully.endpoint_hashkv AS
-SELECT
-    address || ':' || port::text AS "endpoint",
-    '0' AS "hash",
-    '0' AS "hash_revision"
-FROM pgbully.get_nodes()
-ORDER BY node_id;
-
-CREATE VIEW pgbully.watch_status AS
-SELECT
-    'pgbully.watch' AS "watcher_id",
-    'true' AS "is_active",
-    '0' AS "watch_count",
-    '0' AS "watch_pending"
-WHERE pgbully.is_leader();
-
 CREATE VIEW pgbully.member_details AS
 SELECT
     node_id::text AS "ID",
@@ -532,15 +358,6 @@ SELECT
     'NONE' AS "alarm",
     node_id::text AS "memberID"
 FROM pgbully.get_nodes();
-
-CREATE VIEW pgbully.snapshot_status AS
-SELECT
-    '0' AS "hash",
-    '0' AS "revision",
-    '0' AS "total_key",
-    '0' AS "total_size",
-    'true' AS "version"
-WHERE pgbully.is_leader();
 
 -- ===========================================================================
 -- Unqualified views
@@ -592,22 +409,102 @@ SELECT
 FROM pgbully.get_nodes() n,
      LATERAL (SELECT * FROM pgbully.get_cluster_status()) c;
 
--- No replicated log: reported as an empty log rather than an error, so that
--- a monitoring query over this view keeps working.
-CREATE VIEW pgbully.log_status AS
-SELECT
-    c.node_id,
-    0::bigint AS log_size,
-    0::bigint AS last_index,
-    0::bigint AS commit_index,
-    0::bigint AS last_applied,
-    false AS replicated,
-    false AS committed,
-    false AS applied,
-    0::bigint AS errors
-FROM pgbully.get_cluster_status() c;
 
--- Selecting from this view raises: pgBully has no key/value store.
+-- ===========================================================================
+-- Key/value store
+--
+-- Leader-owned and best-effort replicated: writes are accepted only on the
+-- leader, stamped with the current term and the next version, and pushed to
+-- every reachable peer before the call returns.  A follower that fell behind
+-- pulls what it missed before answering a read, so a node that was down heals
+-- itself once it is back.
+--
+-- This is not a quorum store.  A write is durable on the leader and best
+-- effort everywhere else, so a partition can strand recent writes on the side
+-- that loses the election.  It is meant for cluster-scoped configuration that
+-- every node should be able to read locally -- not for data you cannot lose.
+-- ===========================================================================
+
+CREATE TABLE pgbully.kv (
+    key         text PRIMARY KEY,
+    value       text,
+    deleted     boolean     NOT NULL DEFAULT false,
+    version     bigint      NOT NULL,
+    term        bigint      NOT NULL DEFAULT 0,
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- Catch-up reads the table in version order.
+CREATE INDEX kv_version_idx ON pgbully.kv (version);
+
+SELECT pg_catalog.pg_extension_config_dump('pgbully.kv', '');
+
+COMMENT ON TABLE pgbully.kv IS
+    'Replicated key/value rows. Tombstones (deleted = true) are kept so that '
+    'deletions replicate; pgbully.kv_compact() clears them.';
+
+-- Store a key.  Leader only; raises on a follower, naming the leader.
+CREATE FUNCTION pgbully.kv_put(key text, value text)
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pgbully_kv_put'
+    LANGUAGE C;
+
+-- Read a key from this node.  NULL if absent.
+CREATE FUNCTION pgbully.kv_get(key text)
+    RETURNS text
+    AS 'MODULE_PATHNAME', 'pgbully_kv_get'
+    LANGUAGE C;
+
+-- Delete a key.  Leader only.  Returns false if it was not there.
+CREATE FUNCTION pgbully.kv_delete(key text)
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pgbully_kv_delete'
+    LANGUAGE C;
+
+CREATE FUNCTION pgbully.kv_exists(key text)
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pgbully_kv_exists'
+    LANGUAGE C;
+
+-- The live keys, as a JSON array.
+CREATE FUNCTION pgbully.kv_list_keys()
+    RETURNS text
+    AS 'MODULE_PATHNAME', 'pgbully_kv_list_keys'
+    LANGUAGE C;
+
+CREATE FUNCTION pgbully.kv_get_stats(
+    OUT num_entries         integer,
+    OUT total_operations    bigint,
+    OUT last_applied_index  bigint,
+    OUT puts                bigint,
+    OUT deletes             bigint,
+    OUT gets                bigint,
+    OUT active_entries      integer,
+    OUT deleted_entries     integer)
+    RETURNS record
+    AS 'MODULE_PATHNAME', 'pgbully_kv_get_stats'
+    LANGUAGE C;
+
+-- Drop tombstones. Leader only.
+CREATE FUNCTION pgbully.kv_compact()
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pgbully_kv_compact'
+    LANGUAGE C;
+
+-- Empty the store on every reachable node. Leader only.
+CREATE FUNCTION pgbully.kv_reset()
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pgbully_kv_reset'
+    LANGUAGE C;
+
+-- Pull from the leader now instead of waiting for the next read.  Returns the
+-- version this node ends up at.
+CREATE FUNCTION pgbully.kv_sync()
+    RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pgbully_kv_sync'
+    LANGUAGE C;
+
+-- Store health, in the shape the cluster-manager interface expects.
 CREATE VIEW pgbully.kv_store_status AS
 SELECT
     s.num_entries,
@@ -625,6 +522,29 @@ SELECT
     END AS status
 FROM pgbully.kv_get_stats() s;
 
+-- etcd-style one-row summary.
+CREATE VIEW pgbully.kv_status AS
+SELECT
+    'pgbully' AS "key",
+    s.active_entries::text AS "value",
+    s.last_applied_index::text AS "version",
+    '0' AS "create_revision",
+    s.last_applied_index::text AS "mod_revision"
+FROM pgbully.kv_get_stats() s;
+
+-- ---------------------------------------------------------------------------
+-- Privileges: reads for everyone, writes for superusers, replication handlers
+-- for the peers only.
+-- ---------------------------------------------------------------------------
+REVOKE ALL ON FUNCTION pgbully.kv_put(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgbully.kv_delete(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgbully.kv_compact() FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgbully.kv_reset() FROM PUBLIC;
+
+GRANT SELECT ON pgbully.kv TO PUBLIC;
+GRANT SELECT ON pgbully.kv_store_status TO PUBLIC;
+GRANT SELECT ON pgbully.kv_status TO PUBLIC;
+
 -- ===========================================================================
 -- Privileges
 --
@@ -638,18 +558,6 @@ REVOKE ALL ON FUNCTION pgbully.add_node(integer, text, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.remove_node(integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.set_debug(boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.test() FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.log_append(bigint, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.log_commit(bigint) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.log_apply(bigint) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.log_sync_with_leader() FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.replicate_entry(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.record_applied_index(bigint) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_put(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_delete(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_put_local(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_delete_local(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_compact() FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_reset() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION pgbully.get_cluster_status() FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.get_nodes() FROM PUBLIC;
@@ -660,14 +568,6 @@ REVOKE ALL ON FUNCTION pgbully.get_version() FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.get_leader() FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.get_term() FROM PUBLIC;
 REVOKE ALL ON FUNCTION pgbully.get_queue_status() FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.get_applied_index() FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.log_get_entry(bigint) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.log_get_stats() FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.log_get_replication_status() FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_get(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_exists(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_list_keys() FROM PUBLIC;
-REVOKE ALL ON FUNCTION pgbully.kv_get_stats() FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION pgbully.get_cluster_status() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pgbully.get_nodes() TO PUBLIC;
@@ -678,14 +578,6 @@ GRANT EXECUTE ON FUNCTION pgbully.get_version() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pgbully.get_leader() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pgbully.get_term() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pgbully.get_queue_status() TO PUBLIC;
-GRANT EXECUTE ON FUNCTION pgbully.get_applied_index() TO PUBLIC;
-GRANT EXECUTE ON FUNCTION pgbully.log_get_entry(bigint) TO PUBLIC;
-GRANT EXECUTE ON FUNCTION pgbully.log_get_stats() TO PUBLIC;
-GRANT EXECUTE ON FUNCTION pgbully.log_get_replication_status() TO PUBLIC;
-GRANT EXECUTE ON FUNCTION pgbully.kv_get(text) TO PUBLIC;
-GRANT EXECUTE ON FUNCTION pgbully.kv_exists(text) TO PUBLIC;
-GRANT EXECUTE ON FUNCTION pgbully.kv_list_keys() TO PUBLIC;
-GRANT EXECUTE ON FUNCTION pgbully.kv_get_stats() TO PUBLIC;
 
 GRANT SELECT ON pgbully.member_list TO PUBLIC;
 GRANT SELECT ON pgbully.member_list_legacy TO PUBLIC;
@@ -693,21 +585,12 @@ GRANT SELECT ON pgbully.endpoint_status TO PUBLIC;
 GRANT SELECT ON pgbully.endpoint_health TO PUBLIC;
 GRANT SELECT ON pgbully.cluster_health TO PUBLIC;
 GRANT SELECT ON pgbully.cluster_info TO PUBLIC;
-GRANT SELECT ON pgbully.kv_status TO PUBLIC;
-GRANT SELECT ON pgbully.endpoint_hashkv TO PUBLIC;
-GRANT SELECT ON pgbully.watch_status TO PUBLIC;
 GRANT SELECT ON pgbully.member_details TO PUBLIC;
 GRANT SELECT ON pgbully.auth_status TO PUBLIC;
 GRANT SELECT ON pgbully.alarm_list TO PUBLIC;
-GRANT SELECT ON pgbully.snapshot_status TO PUBLIC;
 
 GRANT SELECT ON pgbully.cluster_state TO PUBLIC;
 GRANT SELECT ON pgbully.worker_status TO PUBLIC;
 GRANT SELECT ON pgbully.cluster_overview TO PUBLIC;
 GRANT SELECT ON pgbully.nodes TO PUBLIC;
-GRANT SELECT ON pgbully.log_status TO PUBLIC;
-GRANT SELECT ON pgbully.kv_store_status TO PUBLIC;
 
-GRANT SELECT ON pgbully.kv TO PUBLIC;
-GRANT SELECT ON pgbully.applied_entries TO PUBLIC;
-GRANT SELECT ON pgbully.log_index_mapping TO PUBLIC;

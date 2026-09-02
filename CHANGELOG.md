@@ -32,16 +32,23 @@ Initial release.
   `pgbully.get_version()`, `pgbully.test()`, `pgbully.set_debug()`,
   `pgbully.get_queue_status()`, `pgbully.get_nodes_json()`); the etcd-style
   views (`pgbully.member_list`, `pgbully.endpoint_status`, ...) live in the
-  `pgbully` schema, alongside unqualified `pgbully.cluster_state`,
-  `pgbully.cluster_overview`, `pgbully.worker_status`, `pgbully.nodes` and
-  `pgbully.log_status`.
+  `pgbully` schema, alongside `pgbully.cluster_state`,
+  `pgbully.cluster_overview`, `pgbully.worker_status` and `pgbully.nodes`.
 - `pgbully.add_node()` / `pgbully.remove_node()` change membership in shared
   memory at once; `pgbully.nodes` stays the source of truth and a reload
   restores it.
 - `pgbully.set_debug()` and per-iteration worker state logging.
-- Log-replication and key/value entry points are declared with their full
-  signatures and raise `feature_not_supported` (`0A000`), so a caller probing
-  for them gets a precise error instead of "function does not exist".
+- Replicated key/value store: `pgbully.kv_put()`, `kv_get()`, `kv_delete()`,
+  `kv_exists()`, `kv_list_keys()`, `kv_get_stats()`, `kv_compact()`,
+  `kv_reset()` and `kv_sync()`, over the `pgbully.kv` table, with the
+  `pgbully.kv_status` and `pgbully.kv_store_status` views. Writes are accepted
+  only on the leader, stamped with the current term and a monotonic version,
+  and pushed to every reachable peer; reads are local. A node that was down
+  catches up in both directions — it pulls what it missed, and pushes what a
+  leader that won on node id alone is missing. Not a quorum store: a partition
+  can strand recent writes on the losing side.
+- The log-replication half of the interface is deliberately absent rather than
+  declared-and-raising: without a quorum there is nothing to put behind it.
 - Support for PostgreSQL 15, 16, 17 and 18.
 - TAP regression suites (`t/001_bully.pl` for election and failover,
   `t/002_cluster_api.pl` for the cluster-manager API) and a dependency-free

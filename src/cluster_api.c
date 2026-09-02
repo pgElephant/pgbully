@@ -33,12 +33,11 @@
  *   no leader       this API reports leader id 0 when no leader is known,
  *                   where pgbully.leader() returns NULL.
  *
- * The interface also covers log replication and a key/value store, neither
- * of which the Bully algorithm provides.  Those functions are declared with
- * their full signatures -- so a caller that probes for them, or prepares a
- * statement against them, gets a precise and catchable error instead of
- * "function does not exist" -- and every one raises
- * ERRCODE_FEATURE_NOT_SUPPORTED.
+ * The interface also covers log replication and a key/value store.  pgBully
+ * elects a leader and nothing else, so it carries neither.  Those functions
+ * are absent rather than present-and-refusing: a caller that needs replicated
+ * state is better served by finding out at CREATE EXTENSION time than by a
+ * function that exists only to raise.
  *
  *-------------------------------------------------------------------------
  */
@@ -53,7 +52,6 @@
 #include "storage/lwlock.h"
 #include "utils/builtins.h"
 #include "utils/json.h"
-#include "utils/lsyscache.h"
 #include "utils/timestamp.h"
 
 #include "compat.h"
@@ -72,9 +70,6 @@ PG_FUNCTION_INFO_V1(pgbully_get_version);
 PG_FUNCTION_INFO_V1(pgbully_get_queue_status);
 PG_FUNCTION_INFO_V1(pgbully_compat_test);
 PG_FUNCTION_INFO_V1(pgbully_set_debug);
-
-/* everything the Bully algorithm cannot provide */
-PG_FUNCTION_INFO_V1(pgbully_unsupported);
 
 /* -------------------------------------------------------------------------
  * Helpers
@@ -768,29 +763,4 @@ pgbully_set_debug(PG_FUNCTION_ARGS)
     wake_worker();
 
     PG_RETURN_BOOL(enabled);
-}
-
-/* -------------------------------------------------------------------------
- * Everything the Bully algorithm does not implement
- *
- * One function backs every log-replication and key/value entry point.  They
- * are declared with their full signatures so that a caller which probes for
- * them, or which passes them through a prepared statement, fails with a
- * precise message instead of "function does not exist".
- * ------------------------------------------------------------------------- */
-Datum
-pgbully_unsupported(PG_FUNCTION_ARGS)
-{
-    char       *name = get_func_name(fcinfo->flinfo->fn_oid);
-
-    ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-             errmsg("pgbully.%s() is not supported",
-                    name ? name : "function"),
-             errdetail("pgBully elects a leader; it has no replicated log and "
-                       "no key/value store."),
-             errhint("Applications that need replicated state must use a "
-                     "backend that provides it.")));
-
-    PG_RETURN_NULL();           /* unreachable */
 }

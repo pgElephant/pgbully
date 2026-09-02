@@ -145,11 +145,19 @@ directly**. They are revoked from `PUBLIC` on install.
 | `pgbully.rpc_ping` | `()` | `integer` | liveness probe → this node's id |
 | `pgbully.rpc_election` | `(from_id integer)` | `integer` | a lower node is electing; triggers our own election |
 | `pgbully.rpc_coordinator` | `(leader_id integer, term bigint)` | `bigint` | leader announcement → our (possibly updated) term |
-| `pgbully.rpc_heartbeat` | `(leader_id integer, term bigint)` | `bigint` | leader heartbeat → our (possibly updated) term |
+| `pgbully.rpc_heartbeat` | `(leader_id integer, term bigint, kv_version bigint)` | `bigint` | leader heartbeat → our (possibly updated) term |
+| `pgbully.rpc_kv_apply` | `(key text, value text, deleted boolean, version bigint, term bigint)` | `bigint` | one replicated key/value row → our store version |
+| `pgbully.rpc_kv_since` | `(from_version bigint)` | `setof record` | rows applied after `from_version`, for a peer catching up |
 
 The `bigint` returned by `rpc_coordinator` / `rpc_heartbeat` is the receiver's
 current term, which lets a leader detect that it has been superseded and step
 down.
+
+`rpc_heartbeat` also carries the leader's key/value version. A follower that
+is behind pulls what it missed with `rpc_kv_since`; a follower that is *ahead*
+— because it led while this leader was down — pushes what the leader is
+missing with `rpc_kv_apply`. See
+[cluster-api.md](cluster-api.md#the-keyvalue-store).
 
 ---
 
@@ -157,8 +165,10 @@ down.
 
 On install, the following are revoked from `PUBLIC` (superuser-only):
 
-- `rpc_ping`, `rpc_election`, `rpc_coordinator`, `rpc_heartbeat`
+- `rpc_ping`, `rpc_election`, `rpc_coordinator`, `rpc_heartbeat`,
+  `rpc_kv_apply`, `rpc_kv_since`
 - `force_election`
+- `kv_put`, `kv_delete`, `kv_compact`, `kv_reset`
 
 The read-only monitoring functions (`node_id`, `leader`, `is_leader`, `state`,
 `term`, `status`, `peers`) and the `cluster` view remain available to all
@@ -169,5 +179,7 @@ that role is not a superuser:
 GRANT EXECUTE ON FUNCTION pgbully.rpc_ping()                       TO repl;
 GRANT EXECUTE ON FUNCTION pgbully.rpc_election(integer)            TO repl;
 GRANT EXECUTE ON FUNCTION pgbully.rpc_coordinator(integer, bigint) TO repl;
-GRANT EXECUTE ON FUNCTION pgbully.rpc_heartbeat(integer, bigint)   TO repl;
+GRANT EXECUTE ON FUNCTION pgbully.rpc_heartbeat(integer, bigint, bigint) TO repl;
+GRANT EXECUTE ON FUNCTION pgbully.rpc_kv_apply(text, text, boolean, bigint, bigint) TO repl;
+GRANT EXECUTE ON FUNCTION pgbully.rpc_kv_since(bigint)             TO repl;
 ```
