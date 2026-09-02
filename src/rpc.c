@@ -62,6 +62,35 @@ wake_worker(void)
         SetLatch(PgbCtl->worker_latch);
 }
 
+/*
+ * Record that we just heard from a peer.
+ *
+ * The worker only learns a peer is alive by probing it, which a follower
+ * never does -- it just listens.  A message arriving from a peer is equally
+ * good evidence, and without this a follower reports the leader whose
+ * heartbeats it is happily receiving as unreachable.
+ *
+ * Caller must hold PgbCtl->lock exclusively.
+ */
+static void
+mark_peer_seen(int32 node_id)
+{
+    int         i;
+
+    if (node_id <= 0 || node_id == PgbCtl->my_node_id)
+        return;
+
+    for (i = 0; i < PgbCtl->npeers; i++)
+    {
+        if (PgbCtl->peers[i].in_use && PgbCtl->peers[i].node_id == node_id)
+        {
+            PgbCtl->peers[i].reachable = true;
+            PgbCtl->peers[i].last_seen = GetCurrentTimestamp();
+            break;
+        }
+    }
+}
+
 /* -------------------------------------------------------------------------
  * Inbound RPC handlers
  * ------------------------------------------------------------------------- */
@@ -97,6 +126,7 @@ pgbully_rpc_election(PG_FUNCTION_ARGS)
 
     LWLockAcquire(PgbCtl->lock, LW_EXCLUSIVE);
     id = PgbCtl->my_node_id;
+    mark_peer_seen(from);
     if (from < id)
         PgbCtl->election_requested = true;
     LWLockRelease(PgbCtl->lock);
@@ -121,6 +151,7 @@ pgbully_rpc_coordinator(PG_FUNCTION_ARGS)
     require_shmem();
 
     LWLockAcquire(PgbCtl->lock, LW_EXCLUSIVE);
+    mark_peer_seen(leader);
     if (term >= PgbCtl->term && leader != PgbCtl->my_node_id)
     {
         PgbCtl->term = term;
@@ -162,6 +193,7 @@ pgbully_rpc_heartbeat(PG_FUNCTION_ARGS)
 
     LWLockAcquire(PgbCtl->lock, LW_EXCLUSIVE);
     PgbCtl->heartbeats_recv++;
+    mark_peer_seen(leader);
 
     if (term > PgbCtl->term)
     {
