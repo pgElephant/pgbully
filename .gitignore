@@ -1,0 +1,28 @@
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+*.bc
+src/*.o
+src/*.bc
+
+# PGXS regression / build output
+/results/
+/regression.diffs
+/regression.out
+/tmp_check/
+/log/
+*.tar.gz
+
+# TAP test output
+/t/tmp_check/
+/tmp_install/
+
+# Editor / OS noise
+*.swp
+*~
+.DS_Store
+/.vscode/
+/.idea/
+compile_commands.json

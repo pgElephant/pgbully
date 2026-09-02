@@ -1,0 +1,50 @@
+{
+   "name": "pgbully",
+   "abstract": "Distributed leader election for PostgreSQL using the Bully algorithm",
+   "description": "pgBully turns a set of PostgreSQL nodes into a cluster that always agrees on a single leader. Each node runs a background worker that exchanges heartbeat and election messages with its peers over libpq, continuously running the classic Bully leader-election algorithm: the reachable node with the highest id wins, and failover to the next-highest node is automatic. No external coordinator is required.",
+   "version": "1.0.0",
+   "maintainer": [
+      "pgEdge, Inc. <support@pgedge.com>"
+   ],
+   "license": "postgresql",
+   "prereqs": {
+      "runtime": {
+         "requires": {
+            "PostgreSQL": "15.0.0"
+         }
+      }
+   },
+   "provides": {
+      "pgbully": {
+         "abstract": "Distributed leader election using the Bully algorithm",
+         "file": "sql/pgbully--1.0.sql",
+         "docfile": "docs/index.md",
+         "version": "1.0.0"
+      }
+   },
+   "resources": {
+      "homepage": "https://github.com/pgedge/pgBully",
+      "bugtracker": {
+         "web": "https://github.com/pgedge/pgBully/issues"
+      },
+      "repository": {
+         "url": "git://github.com/pgedge/pgBully.git",
+         "web": "https://github.com/pgedge/pgBully",
+         "type": "git"
+      }
+   },
+   "generated_by": "pgEdge",
+   "meta-spec": {
+      "version": "1.0.0",
+      "url": "https://pgxn.org/meta/spec.txt"
+   },
+   "tags": [
+      "leader election",
+      "bully algorithm",
+      "distributed",
+      "high availability",
+      "consensus",
+      "cluster",
+      "failover"
+   ]
+}

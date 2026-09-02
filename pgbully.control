@@ -1,0 +1,6 @@
+# pgBully extension control file
+comment = 'Distributed leader election for PostgreSQL using the Bully algorithm'
+default_version = '1.0'
+module_pathname = '$libdir/pgbully'
+relocatable = true
+superuser = true

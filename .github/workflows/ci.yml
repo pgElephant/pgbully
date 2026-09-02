@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: PostgreSQL ${{ matrix.pgversion }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pgversion: [15, 16, 17, 18]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL ${{ matrix.pgversion }} and build deps
+        run: |
+          sudo apt-get update
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-${{ matrix.pgversion }} \
+            postgresql-server-dev-${{ matrix.pgversion }} \
+            libipc-run-perl gcc make
+
+      - name: Build
+        run: make PG_CONFIG=/usr/lib/postgresql/${{ matrix.pgversion }}/bin/pg_config
+
+      - name: Install
+        run: sudo make install PG_CONFIG=/usr/lib/postgresql/${{ matrix.pgversion }}/bin/pg_config
+
+      - name: Integration test (dependency-free)
+        run: |
+          # Run as the postgres superuser so initdb/pg_ctl work.
+          sudo chmod o+rwx .
+          sudo -u postgres env PATH="/usr/lib/postgresql/${{ matrix.pgversion }}/bin:$PATH" \
+            PG_CONFIG=/usr/lib/postgresql/${{ matrix.pgversion }}/bin/pg_config \
+            BASE_PORT=55600 \
+            ./test/integration.sh
+
+      - name: TAP regression suite
+        run: |
+          sudo make installcheck \
+            PG_CONFIG=/usr/lib/postgresql/${{ matrix.pgversion }}/bin/pg_config \
+          || (echo "---- regression diffs ----"; cat regression.diffs 2>/dev/null; \
+              find . -name 'regress_log_*' -exec cat {} +; exit 1)
