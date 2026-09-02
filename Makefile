@@ -18,7 +18,7 @@ TAP_TESTS   = 1
 PG_CONFIG  ?= pg_config
 
 # libpq is used by the background worker to talk to peer nodes.
-PG_CPPFLAGS += -I$(shell $(PG_CONFIG) --includedir) -Isrc
+PG_CPPFLAGS += -I$(shell $(PG_CONFIG) --includedir) -Iinclude
 SHLIB_LINK  += -L$(shell $(PG_CONFIG) --libdir) -lpq
 
 PGXS := $(shell $(PG_CONFIG) --pgxs)

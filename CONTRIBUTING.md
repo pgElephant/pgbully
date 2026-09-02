@@ -39,17 +39,21 @@ make installcheck PG_CONFIG=/path/to/pg_config
 | `src/transport.c` | libpq peer transport |
 | `src/worker.c` | background worker + Bully state machine |
 | `src/rpc.c` | SQL-callable RPC handlers + monitoring functions |
-| `src/compat.h` | cross-version (PG 15–18) shims |
+| `src/cluster_api.c` | the cluster-manager API |
+| `include/pgbully.h` | shared state, GUCs, cross-module prototypes |
+| `include/compat.h` | cross-version (PG 15–18) shims |
 | `sql/` | extension install script |
-| `t/`, `test/` | TAP and shell tests |
+| `t/` | TAP suites (`make installcheck`) |
+| `test/` | dependency-free shell integration test |
 | `docs/` | documentation |
 
 ## Coding standards
 
-- Follow the [PostgreSQL source code formatting](https://www.postgresql.org/docs/current/source-format.html):
-  tabs for indentation, braces on their own lines, `/* ... */` comments.
+- Follow the surrounding style: four spaces per indent level, braces on their
+  own lines, `/* ... */` comments, and the declaration block at the top of each
+  function. `.editorconfig` encodes the whitespace rules.
 - Keep the extension buildable on **all** of PostgreSQL 15, 16, 17 and 18.
-  Hide any version differences behind `src/compat.h`.
+  Hide any version differences behind `include/compat.h`.
 - Follow the
   [PostgreSQL error message style guide](https://www.postgresql.org/docs/current/error-style-guide.html):
   primary messages are lowercase and have no trailing period; detail and hint

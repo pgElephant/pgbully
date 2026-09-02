@@ -8,7 +8,8 @@ next-highest node is automatic.
 
 ## Start here
 
-- **New to pgBully?** Read the [README](../README.md) for the elevator pitch
+- **New to pgBully?** Read the
+  [README](https://github.com/pgElephant/pgbully#readme) for the elevator pitch
   and a quick start, then come back here.
 - **Installing?** [installation.md](installation.md).
 - **Configuring a cluster?** [configuration.md](configuration.md).

@@ -1,0 +1,12 @@
+# Default owners for everything in the repository.
+*                       @pgElephant/maintainers
+
+# The election algorithm and shared state deserve a careful read.
+/src/                   @pgElephant/maintainers
+/include/               @pgElephant/maintainers
+/sql/                   @pgElephant/maintainers
+
+# Tests and CI.
+/t/                     @pgElephant/maintainers
+/test/                  @pgElephant/maintainers
+/.github/workflows/     @pgElephant/maintainers

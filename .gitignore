@@ -19,6 +19,9 @@ src/*.bc
 /t/tmp_check/
 /tmp_install/
 
+# Documentation build output
+/site/
+
 # Editor / OS noise
 *.swp
 *~

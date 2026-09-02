@@ -195,6 +195,16 @@ SELECT * FROM pgbully.member_list;
 | `pgbully.log_status` | Always an empty log — see below |
 | `pgbully.kv_store_status` | Raises on select — see below |
 
+Two names need a word of warning:
+
+- **`pgbully.nodes`** is both this view and the membership setting. They live
+  in different namespaces and never collide in practice —
+  `SELECT * FROM pgbully.nodes` reads the view, `SHOW pgbully.nodes` reads the
+  setting — but they are not the same object.
+- **`pgbully.kv_status`** is the etcd-style summary above.
+  **`pgbully.kv_store_status`** is the key/value store's own health view, which
+  raises because pgBully has no key/value store.
+
 ---
 
 ## Log replication and the key/value store
@@ -247,11 +257,12 @@ The tables `pgbully.kv`, `pgbully.applied_entries` and
 
 ## Permissions
 
-Read-only introspection is granted to `PUBLIC`. Everything that changes
-cluster state — `pgbully.init`, `pgbully.add_node`, `pgbully.remove_node`,
-`pgbully.set_debug`, `pgbully.test`, and the log and key/value writers — is
-revoked from `PUBLIC` and available to superusers only. Grant explicitly if
-your control plane connects as a non-superuser:
+Read-only introspection is granted to `PUBLIC`. Everything else is revoked and
+left to superusers: the functions that change cluster state (`pgbully.init`,
+`pgbully.add_node`, `pgbully.remove_node`), the two that change how the node
+behaves or reports (`pgbully.set_debug`, `pgbully.test`), and the log and
+key/value writers. Grant explicitly if your control plane connects as a
+non-superuser:
 
 ```sql
 GRANT EXECUTE ON FUNCTION pgbully.add_node(integer, text, integer) TO ctrl;

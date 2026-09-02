@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keep the actions used by CI current; they are the only pinned
+  # third-party dependency pgBully has.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+      - ci

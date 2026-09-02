@@ -1,0 +1,21 @@
+# Normalise line endings so a Windows checkout does not rewrite the tree.
+* text=auto eol=lf
+
+*.c      text diff=cpp
+*.h      text diff=cpp
+*.sql    text
+*.pl     text
+*.sh     text eol=lf
+Makefile text
+
+*.png    binary
+*.jpg    binary
+*.so     binary
+*.dylib  binary
+
+# Keep noise out of release tarballs and language statistics.
+docs/**      linguist-documentation
+.github/**   export-ignore
+.gitattributes export-ignore
+.gitignore     export-ignore
+.editorconfig  export-ignore

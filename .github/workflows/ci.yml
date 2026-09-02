@@ -7,6 +7,23 @@ on:
   workflow_dispatch:
 
 jobs:
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install MkDocs
+        run: pip install -r docs-requirements.txt
+
+      - name: Build the site
+        run: mkdocs build --strict
+
   build-and-test:
     name: PostgreSQL ${{ matrix.pgversion }}
     runs-on: ubuntu-latest

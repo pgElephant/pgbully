@@ -43,7 +43,7 @@ The worker holds `BGWORKER_SHMEM_ACCESS` only — it needs no database
 connection of its own, because all peer communication is outbound libpq and
 all local state lives in shared memory.
 
-## 2. Shared memory (`src/shmem.c`, `struct PgbShared`)
+## 2. Shared memory (`src/shmem.c`, `struct PgbShared` in `include/pgbully.h`)
 
 A single fixed-size control block, allocated through the PG15+
 `shmem_request_hook` / `shmem_startup_hook` pair and protected by one named

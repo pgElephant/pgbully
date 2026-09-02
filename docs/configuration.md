@@ -36,13 +36,13 @@ All configuration is done through GUC parameters in `postgresql.conf` (or via
 
 ### `pgbully.heartbeat_interval`
 
-- **Type:** integer (ms) · **Default:** `1000` (`1s`) · **Context:** `SIGHUP`
+- **Type:** integer (ms) · **Default:** `1000` (`1s`) · **Range:** `50` – `600000` · **Context:** `SIGHUP`
 - How often the leader sends a heartbeat to every peer. Smaller values detect
   a dead leader faster but generate more traffic.
 
 ### `pgbully.election_timeout`
 
-- **Type:** integer (ms) · **Default:** `5000` (`5s`) · **Context:** `SIGHUP`
+- **Type:** integer (ms) · **Default:** `5000` (`5s`) · **Range:** `100` – `3600000` · **Context:** `SIGHUP`
 - How long a follower will go without hearing from the leader before it starts
   an election. **Must be comfortably larger than `heartbeat_interval`** — a
   common rule of thumb is 3–5× — so that a single dropped heartbeat does not
@@ -50,7 +50,7 @@ All configuration is done through GUC parameters in `postgresql.conf` (or via
 
 ### `pgbully.connect_timeout`
 
-- **Type:** integer (ms) · **Default:** `2000` (`2s`) · **Context:** `SIGHUP`
+- **Type:** integer (ms) · **Default:** `2000` (`2s`) · **Range:** `100` – `60000` · **Context:** `SIGHUP`
 - Upper bound on the time spent contacting a single peer (used both as libpq's
   `connect_timeout` and as a server-side `statement_timeout` on the RPC call).
   Keep it well below `election_timeout`, since an election may contact several
@@ -62,6 +62,10 @@ All configuration is done through GUC parameters in `postgresql.conf` (or via
 - When `off`, the worker stops participating: it relinquishes any leadership,
   reports `follower` with no leader, and ignores election timers. Useful for
   draining a node for maintenance without removing it from `pgbully.nodes`.
+
+All three timeouts carry PostgreSQL's millisecond unit, so `'250ms'`, `'2s'`
+and `'1min'` are all accepted and `SHOW` reports them in the friendliest unit.
+A value outside the range above is rejected when the configuration is loaded.
 
 ## Tuning the timeouts
 

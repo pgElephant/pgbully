@@ -1,0 +1,55 @@
+site_name: pgBully
+site_description: Distributed leader election for PostgreSQL, using the Bully algorithm
+site_url: https://www.pgelephant.com/pgbully
+repo_url: https://github.com/pgElephant/pgbully
+repo_name: pgElephant/pgbully
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; pgEdge, Inc.
+
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Configuration: configuration.md
+  - Architecture: architecture.md
+  - Algorithm: algorithm.md
+  - SQL API: api.md
+  - Cluster-manager API: cluster-api.md
+  - Operations: operations.md
+  - FAQ: faq.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+# Fail the build on a link that points at a page that does not exist.
+validation:
+  links:
+    absolute_links: ignore
+    unrecognized_links: warn

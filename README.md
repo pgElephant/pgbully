@@ -33,15 +33,18 @@ no etcd, no ZooKeeper.
 - **Self-contained.** The whole protocol runs *inside* PostgreSQL as a
   background worker. The only dependency is libpq, which every PostgreSQL
   install already ships.
-- **Deterministic.** The Bully algorithm guarantees the highest-id reachable
-  node is leader. No split-brain under a correct configuration, no surprise
-  winners.
+- **Deterministic.** The highest-id reachable node always converges to
+  leadership — no quorum arithmetic, no surprise winners. A network partition
+  can still leave one leader per side; a monotonic term resolves it the moment
+  the partition heals. See
+  [the limits](docs/algorithm.md#guarantees-and-limits).
 - **Observable.** Leadership, term, peer reachability and counters are all
   exposed through plain SQL functions and a view.
 - **Portable.** A single codebase builds cleanly on PostgreSQL **15, 16, 17
   and 18**.
-- **Tested.** Ships with a TAP suite and a dependency-free shell integration
-  test that exercise real multi-node election and failover.
+- **Tested.** Ships with TAP suites and a dependency-free shell integration
+  test that stand up real multi-node clusters and exercise election, failover
+  and reclaim.
 
 ## What it is *not*
 
@@ -206,11 +209,24 @@ make installcheck PG_CONFIG=/path/to/pg_config
 | 15 | ✅ Supported (CI) |
 | ≤ 14 | ❌ Not supported (`shmem_request_hook` required) |
 
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/` | C sources: module init, GUCs, shared memory, worker, transport, SQL functions |
+| `include/` | `pgbully.h` (shared state and prototypes) and `compat.h` (PG 15–18 shims) |
+| `sql/` | The extension install script |
+| `t/` | TAP suites, run by `make installcheck` |
+| `test/` | Dependency-free shell integration test |
+| `docs/` | Documentation, indexed by [docs/index.md](docs/index.md) |
+| `.github/` | CI workflow, issue and pull-request templates |
+
 ## Contributing
 
 Bug reports, ideas and pull requests are welcome — see
 [CONTRIBUTING.md](CONTRIBUTING.md). Please also read our
 [Code of Conduct](CODE_OF_CONDUCT.md) and the [security policy](SECURITY.md).
+For help using pgBully, start with [SUPPORT.md](SUPPORT.md).
 
 ## License
 

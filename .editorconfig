@@ -1,0 +1,32 @@
+# PostgreSQL's own conventions: 4-space tabs, tab-indented C.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{c,h}]
+indent_style = space
+indent_size = 4
+max_line_length = 79
+
+[Makefile]
+indent_style = tab
+
+[*.sql]
+indent_style = space
+indent_size = 4
+
+[*.{pl,pm}]
+indent_style = tab
+indent_size = 4
+
+[*.{md,yml,yaml,json}]
+indent_style = space
+indent_size = 2
+
+[*.sh]
+indent_style = space
+indent_size = 4
