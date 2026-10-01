@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Followers now ping every other peer once per heartbeat interval, so
+  `pgbully.peers()` reports `reachable` and `last_seen` for every node from
+  every node.  Previously only the leader contacted the others, and a
+  follower saw every other follower as unreachable.
+
 ## [1.0.0] - 2026-06-03
 
 Initial release.

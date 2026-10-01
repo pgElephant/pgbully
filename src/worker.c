@@ -36,6 +36,7 @@
 
 /* timestamp of our last heartbeat broadcast (worker-local) */
 static TimestampTz last_hb_sent = 0;
+static TimestampTz last_probe_sent = 0;
 
 /* whether we have already warned that this node is misconfigured */
 static bool member_warned = false;
@@ -44,6 +45,7 @@ static void pgbully_main_loop(void);
 static void start_election(void);
 static void become_leader(void);
 static void send_heartbeats(void);
+static void probe_peers(void);
 static void update_peer_status(int32 node_id, bool reachable);
 
 /* -------------------------------------------------------------------------
@@ -233,6 +235,12 @@ pgbully_main_loop(void)
                 case PGB_WAITING:
                     if (elapsed_hb >= pgbully_election_timeout_ms)
                         start_election();
+                    else if (last_probe_sent == 0 ||
+                             pgb_ts_diff_ms(last_probe_sent, now) >= pgbully_heartbeat_interval_ms)
+                    {
+                        probe_peers();
+                        last_probe_sent = now;
+                    }
                     break;
 
                 case PGB_CANDIDATE:
@@ -451,6 +459,42 @@ send_heartbeats(void)
         ereport(LOG,
                 (errmsg("pgbully: node %d stepping down; observed higher term "
                         INT64_FORMAT, my_id, observed_term)));
+    }
+}
+
+/*
+ * Ping every other peer once per heartbeat interval.
+ *
+ * Only the leader contacts the others in the course of the algorithm, so
+ * without this a follower would know the leader to be reachable and nobody
+ * else, and pgbully.peers() would report every other follower as down.  The
+ * probe makes reachable and last_seen mean the same thing on every node.
+ */
+static void
+probe_peers(void)
+{
+    PgbPeer     peers[PGBULLY_MAX_NODES];
+    int         npeers;
+    int32       my_id;
+    int         i;
+
+    LWLockAcquire(PgbCtl->lock, LW_SHARED);
+    my_id = PgbCtl->my_node_id;
+    npeers = PgbCtl->npeers;
+    memcpy(peers, PgbCtl->peers, sizeof(PgbPeer) * npeers);
+    LWLockRelease(PgbCtl->lock);
+
+    for (i = 0; i < npeers; i++)
+    {
+        PgbRpcResult rc;
+
+        if (!peers[i].in_use || peers[i].node_id == my_id)
+            continue;
+
+        CHECK_FOR_INTERRUPTS();
+
+        rc = pgbully_send_ping(&peers[i], NULL);
+        update_peer_status(peers[i].node_id, rc == PGB_RPC_OK);
     }
 }
 
